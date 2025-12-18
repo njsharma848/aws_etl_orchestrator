@@ -1,0 +1,26 @@
+[
+    {
+        "job_id": "job_01",
+        "job_name": "AWS Expense Export",
+        "source_file_path": "s3://nyl-invgai-dev-anaplan/data/in/Export - Actual AWS Data - Expense.csv",
+        "target_table": "aws_expense_testing",
+        "upsert_keys": ["Data_index", "time2"],
+        "is_active": true
+    },
+    {
+        "job_id": "job_02",
+        "job_name": "AWS Forecast Export",
+        "source_file_path": "s3://nyl-invgai-dev-anaplan/data/in/Export - Forecast Data.csv",
+        "target_table": "aws_forecast_testing",
+        "upsert_keys": ["Data_index", "time2"],
+        "is_active": true
+    },
+    {
+        "job_id": "job_03",
+        "job_name": "AWS Revenue Export",
+        "source_file_path": "s3://nyl-invgai-dev-anaplan/data/in/Export - Revenue Data.csv",
+        "target_table": "aws_revenue_testing",
+        "upsert_keys": ["Data_index", "time2"],
+        "is_active": true
+    }
+]
