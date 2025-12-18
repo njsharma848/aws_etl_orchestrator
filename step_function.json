@@ -1,0 +1,44 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "ProcessJobs",
+  "States": {
+    "ProcessJobs": {
+      "Type": "Map",
+      "MaxConcurrency": 1,
+      "ItemsPath": "$.glue_jobs",
+      "Iterator": {
+        "StartAt": "RunGlueJob",
+        "States": {
+          "RunGlueJob": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+              "JobName": "sample",
+              "Arguments": {
+                "--job_id.$": "$.job_id",
+                "--job_name.$": "$.job_name",
+                "--source_file_path.$": "$.source_file_path",
+                "--target_table.$": "$.target_table",
+                "--upsert_keys.$": "States.JsonToString($.upsert_keys)"
+              }
+            },
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "LogError"
+              }
+            ],
+            "End": true
+          },
+          "LogError": {
+            "Type": "Pass",
+            "Result": "Job failed, continuing...",
+            "End": true
+          }
+        }
+      },
+      "End": true
+    }
+  }
+}
