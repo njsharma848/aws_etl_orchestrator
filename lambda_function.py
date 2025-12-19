@@ -3,31 +3,29 @@ import boto3
 import os
 import re
 from datetime import datetime, timezone
+from botocore.exceptions import ClientError
 
 s3 = boto3.client("s3")
 sns = boto3.client("sns")
 sfn = boto3.client("stepfunctions")
 
 
-def normalize(name: str) -> str:
+def normalize(name):
+    """Convert filename to lowercase for comparison"""
+    if not name:
+        return ""
     return name.strip().lower()
 
 
-def sanitize_execution_name(name: str) -> str:
-    """
-    Sanitize string for Step Function execution name.
-    Only allows: alphanumeric, hyphens, underscores.
-    Max length: 80 characters.
-    """
-    # Replace spaces and dots with hyphens
+def sanitize_execution_name(name):
+    """Clean filename for use in Step Functions execution name"""
     sanitized = name.replace(' ', '-').replace('.', '-')
-    # Remove any character that's not alphanumeric, hyphen, or underscore
     sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', sanitized)
-    # Ensure it doesn't exceed 80 characters (leaving room for timestamp)
     return sanitized[:50]
 
 
 def build_glue_job(job, file_name=None):
+    """Prepare job configuration for Step Functions"""
     return {
         "job_id": job["job_id"],
         "job_name": job["job_name"],
@@ -37,208 +35,207 @@ def build_glue_job(job, file_name=None):
     }
 
 
-def lambda_handler(event, context):
-
-    # ---------------------------------------------------------
-    # DEFENSIVE LOGGING (VERY IMPORTANT)
-    # ---------------------------------------------------------
-    print("🚀 Lambda invoked")
-    print(json.dumps(event))
-
-    if event.get("source") != "aws.s3":
-        print("Not an EventBridge S3 event → ignoring")
-        return {"message": "Ignored non-S3 event"}
-
-    # ---------------------------------------------------------
-    # EXTRACT EVENT DETAILS
-    # ---------------------------------------------------------
-    detail = event.get("detail", {})
-    bucket = detail["bucket"]["name"]
-    key = detail["object"]["key"]
-
-    print(f"Processing S3 event → bucket={bucket}, key={key}")
-
-    # ---------------------------------------------------------
-    # IGNORE STAGING AND ARCHIVE FILES
-    # ---------------------------------------------------------
-    if key.startswith("data/staging/") or key.startswith("data/archive/"):
-        print(f"⏭️  Ignoring file in staging/archive: {key}")
-        return {"message": "Ignored - staging/archive file"}
-
-    # ---------------------------------------------------------
-    # ENV VARIABLES
-    # ---------------------------------------------------------
-    CONFIG_BUCKET = os.environ["CONFIG_BUCKET"]
-    CONFIG_KEY = os.environ["CONFIG_KEY"]
-    SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
-    STEP_FUNCTION_ARN = os.environ["STEP_FUNCTION_ARN"]
-
-    # ---------------------------------------------------------
-    # LOAD CONFIG.JSON
-    # ---------------------------------------------------------
+def load_all_config_files(bucket, config_prefix="config/"):
+    """Load and merge all config files from S3"""
+    all_jobs = []
+    
     try:
-        config_obj = s3.get_object(Bucket=CONFIG_BUCKET, Key=CONFIG_KEY)
-        config_jobs = json.loads(config_obj["Body"].read().decode("utf-8"))
-    except Exception as e:
-        print(f"Failed to load config.json: {e}")
+        response = s3.list_objects_v2(Bucket=bucket, Prefix=config_prefix)
+        
+        if "Contents" not in response:
+            print(f"Warning: No config files found in {config_prefix}")
+            return []
+        
+        for obj in response["Contents"]:
+            config_key = obj["Key"]
+            
+            if config_key.endswith('/') or not config_key.endswith(".json"):
+                continue
+            
+            try:
+                print(f"Loading config: {config_key}")
+                config_obj = s3.get_object(Bucket=bucket, Key=config_key)
+                config_jobs = json.loads(config_obj["Body"].read().decode("utf-8"))
+                
+                if not isinstance(config_jobs, list):
+                    print(f"Skipping {config_key} - invalid format")
+                    continue
+                
+                # Track which config file each job came from
+                for job in config_jobs:
+                    job["_config_source"] = config_key
+                
+                all_jobs.extend(config_jobs)
+                print(f"Loaded {len(config_jobs)} jobs from {config_key}")
+                
+            except (ClientError, json.JSONDecodeError) as e:
+                print(f"Error loading {config_key}: {e}")
+                continue
+        
+        print(f"Total jobs loaded: {len(all_jobs)}")
+        return all_jobs
+        
+    except ClientError as e:
+        print(f"Failed to list config files: {e}")
         raise
 
-    # ---------------------------------------------------------
-    # CASE 1: CONFIG.JSON UPLOADED → RE-RUN ALL DATA FILES
-    # ---------------------------------------------------------
-    if key.startswith("config/") and key.endswith(".json"):
 
-        print("Detected config.json upload → processing all data/in/*.csv")
-
-        # Send simple SNS notification
+def send_notification(topic_arn, subject, message):
+    """Send email notification via SNS"""
+    try:
         sns.publish(
-            TopicArn=SNS_TOPIC_ARN,
-            Subject="Config.json Uploaded",
-            Message=f"Config.json has been uploaded.\n\nBucket: {bucket}\nKey: {key}"
+            TopicArn=topic_arn,
+            Subject=subject,
+            Message=message
         )
-        print("📧 Config upload notification sent")
+        print(f"Notification sent: {subject}")
+        return True
+    except ClientError as e:
+        print(f"Failed to send notification: {e}")
+        return False
 
-        response = s3.list_objects_v2(Bucket=bucket, Prefix="data/in/")
-        if "Contents" not in response:
-            print("No data files found under data/in/")
-            return {"message": "No data files found"}
 
-        for obj in response["Contents"]:
-            if not obj["Key"].endswith(".csv"):
-                continue
+def lambda_handler(event, context):
+    """Process S3 file upload events"""
+    
+    print("Lambda triggered")
+    print(json.dumps(event))
 
-            file_name = obj["Key"].split("/")[-1]
-            normalized_file = normalize(file_name)
+    # Verify this is an S3 event
+    if event.get("source") != "aws.s3":
+        print("Ignoring non-S3 event")
+        return {"message": "Not an S3 event"}
 
-            for job in config_jobs:
-                # Extract filename from config path
-                config_file = normalize(job["source_file_name"].split("/")[-1])
+    # Get file details from event
+    try:
+        detail = event.get("detail", {})
+        bucket = detail["bucket"]["name"]
+        key = detail["object"]["key"]
+    except KeyError as e:
+        print(f"Invalid event structure: {e}")
+        return {"message": "Invalid event"}
 
-                if normalized_file == config_file and job.get("is_active", False):
+    print(f"Processing: {key} from {bucket}")
 
-                    execution_name = (
-                        f"run-{job['job_id']}-"
-                        f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-                    )
+    # Skip config files - they're loaded dynamically
+    if key.startswith("config/"):
+        print("Ignoring config file upload")
+        return {"message": "Config file ignored"}
+    
+    # Skip staging and archive folders
+    if key.startswith("data/staging/") or key.startswith("data/archive/"):
+        print("Ignoring staging/archive file")
+        return {"message": "Staging/archive file ignored"}
 
-                    sfn.start_execution(
-                        stateMachineArn=STEP_FUNCTION_ARN,
-                        name=execution_name,
-                        input=json.dumps({
-                            "glue_jobs": [
-                                build_glue_job(job, file_name)
-                            ]
-                        })
-                    )
+    # Only process CSV files in data/in/
+    if not key.startswith("data/in/") or not key.endswith(".csv"):
+        print("File not in data/in/ or not CSV")
+        return {"message": "File ignored"}
 
-                    print(f"Triggered job for {file_name} → execution: {execution_name}")
+    # Get environment variables
+    try:
+        SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
+        STEP_FUNCTION_ARN = os.environ["STEP_FUNCTION_ARN"]
+    except KeyError as e:
+        print(f"Missing environment variable: {e}")
+        raise
 
-        return {"message": "Config refresh completed"}
-
-    # ---------------------------------------------------------
-    # CASE 2: NEW FILE ARRIVED IN data/in/
-    # ---------------------------------------------------------
-    if key.startswith("data/in/") and key.endswith(".csv"):
-
+    # Load config files
+    config_jobs = load_all_config_files(bucket)
+    
+    if not config_jobs:
         file_name = key.split("/")[-1]
-        normalized_file = normalize(file_name)
-
-        print(f"Processing new data file → {file_name}")
-
-        # Find matching job (active or inactive)
-        matching_job = None
-        for job in config_jobs:
-            config_file = normalize(job["source_file_name"].split("/")[-1])
-            if config_file == normalized_file:
-                matching_job = job
-                break
-
-        # ---------------------------------------------------------
-        # CASE 2A: FILE NOT IN CONFIG AT ALL
-        # ---------------------------------------------------------
-        if not matching_job:
-            sns.publish(
-                TopicArn=SNS_TOPIC_ARN,
-                Subject="⚠️ Unmapped S3 CSV File Uploaded",
-                Message=(
-                    f"A CSV file was uploaded but not found in config.json\n\n"
-                    f"📁 File Details:\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• Bucket: {bucket}\n"
-                    f"• Key: {key}\n"
-                    f"• File Name: {file_name}\n\n"
-                    f"⚡ Action Required:\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"1. Add this file to config.json with appropriate job configuration, OR\n"
-                    f"2. Remove the file from data/in/ if uploaded by mistake\n\n"
-                    f"This is an automated notification from the ETL pipeline."
-                )
-            )
-            print(f"📧 SNS sent for unmapped file → {file_name}")
-            return {"message": "SNS sent for unmapped file", "file": file_name}
-
-        # ---------------------------------------------------------
-        # CASE 2B: FILE IN CONFIG BUT JOB IS INACTIVE
-        # ---------------------------------------------------------
-        if not matching_job.get("is_active", False):
-            sns.publish(
-                TopicArn=SNS_TOPIC_ARN,
-                Subject="⏸️ CSV File Upload Skipped - Job Inactive",
-                Message=(
-                    f"A CSV file was uploaded but its job is marked as inactive in config.json\n\n"
-                    f"📁 File Details:\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• Bucket: {bucket}\n"
-                    f"• Key: {key}\n"
-                    f"• File Name: {file_name}\n\n"
-                    f"📋 Job Details:\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• Job ID: {matching_job['job_id']}\n"
-                    f"• Job Name: {matching_job['job_name']}\n"
-                    f"• Target Table: {matching_job['target_table']}\n"
-                    f"• Status: INACTIVE\n\n"
-                    f"⚡ Action Required:\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"Set 'is_active: true' in config.json to process this file.\n\n"
-                    f"This is an automated notification from the ETL pipeline."
-                )
-            )
-            print(f"📧 SNS sent for inactive job → {file_name} (job_id: {matching_job['job_id']})")
-            return {
-                "message": "SNS sent for inactive job",
-                "file": file_name,
-                "job_id": matching_job["job_id"]
-            }
-
-        # ---------------------------------------------------------
-        # CASE 2C: FILE IN CONFIG AND JOB IS ACTIVE → TRIGGER
-        # ---------------------------------------------------------
-        matched_jobs = [build_glue_job(matching_job, file_name)]
-
-        safe_name = sanitize_execution_name(normalized_file)
-        execution_name = (
-            f"run-{safe_name}-"
-            f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        send_notification(
+            SNS_TOPIC_ARN,
+            "No Config Files Found",
+            f"File uploaded but no configuration found.\n\n"
+            f"File: {file_name}\n"
+            f"Bucket: {bucket}\n"
+            f"Key: {key}\n\n"
+            f"Please add config files to the config/ folder."
         )
+        return {"message": "No config files"}
 
+    # Extract filename
+    file_name = key.split("/")[-1]
+    normalized_file = normalize(file_name)
+
+    print(f"Processing file: {file_name}")
+
+    # Find matching job configuration
+    matching_job = None
+    for job in config_jobs:
+        config_file = normalize(job["source_file_name"].split("/")[-1])
+        if config_file == normalized_file:
+            matching_job = job
+            print(f"Matched with job: {job['job_id']}")
+            break
+
+    # Handle unmapped file
+    if not matching_job:
+        print("No matching job found")
+        
+        send_notification(
+            SNS_TOPIC_ARN,
+            "Unmapped File Uploaded",
+            f"File uploaded but not configured for processing.\n\n"
+            f"File: {file_name}\n"
+            f"Bucket: {bucket}\n"
+            f"Key: {key}\n\n"
+            f"Action needed:\n"
+            f"- Add configuration for this file, or\n"
+            f"- Remove file if uploaded by mistake\n\n"
+            f"Searched {len(config_jobs)} job configs."
+        )
+        
+        return {"message": "File not configured"}
+
+    # Handle inactive job
+    if not matching_job.get("is_active", False):
+        print("Job is inactive")
+        
+        send_notification(
+            SNS_TOPIC_ARN,
+            "File Upload Skipped - Inactive Job",
+            f"File uploaded but job is currently inactive.\n\n"
+            f"File: {file_name}\n"
+            f"Job ID: {matching_job['job_id']}\n"
+            f"Job Name: {matching_job['job_name']}\n"
+            f"Config: {matching_job.get('_config_source', 'unknown')}\n\n"
+            f"To process this file, set is_active to true in the config."
+        )
+        
+        return {"message": "Job inactive"}
+
+    # Trigger Step Functions
+    safe_name = sanitize_execution_name(normalized_file)
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
+    execution_name = f"run-{safe_name}-{timestamp}"
+
+    print(f"Starting execution: {execution_name}")
+
+    try:
         sfn.start_execution(
             stateMachineArn=STEP_FUNCTION_ARN,
             name=execution_name,
             input=json.dumps({
-                "glue_jobs": matched_jobs
+                "glue_jobs": [build_glue_job(matching_job, file_name)]
             })
         )
-
-        print(f"✅ Step Function triggered for {file_name} → execution: {execution_name}")
+        
+        print("Step Function started successfully")
+        
         return {
             "message": "Job triggered",
             "file": file_name,
             "job_id": matching_job["job_id"],
-            "execution_name": execution_name
+            "execution": execution_name
         }
-
-    # ---------------------------------------------------------
-    # CASE 3: EVERYTHING ELSE → IGNORE
-    # ---------------------------------------------------------
-    print("Ignoring non-relevant S3 event")
-    return {"message": "Ignored"}
+        
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ExecutionAlreadyExists':
+            print("Execution already exists")
+            return {"message": "Already running"}
+        else:
+            print(f"Failed to start Step Function: {e}")
+            raise
