@@ -616,6 +616,107 @@ def get_row_count(config: dict, redshift_conn: dict, client) -> int:
         return int(first_cell["stringValue"])
     raise ValueError(f"Unexpected count cell format: {first_cell}")
 
+#====================================================
+#create view
+#====================================================
+def create_views(config: dict, redshift_conn: dict, client, log):
+    bucket = config['src_bucket']
+    if not bucket:
+        log.error("source bucket is not defined")
+        raise ValueError("source bucket not found")
+    
+    key = "config/view_config.json"
+    if not key:
+        log.error("path for config file is not defined")
+        raise ValueError("path of the view_config is not found")
+    
+    s3 = boto3.client('s3')
+    try:
+        response = s3.get_object(Bucket=bucket, Key=key)
+        json_file = response['Body'].read().decode('utf-8')
+        data = json.loads(json_file)
+    except Exception as e:
+        log.error(f"Failed to download or parse config file from S3: {e}")
+        raise
+
+    v_config = None
+    for d in data:
+        if d['source_table'] == config['target_table']:
+            v_config = {
+                'source_table': d['source_table'],
+                'view_name': d['view_name'],
+                'schema_name': d['schema_name'],
+                'definition': d['definition']
+            }
+    
+    if not v_config:
+        log.error("No configuration found for the target table")
+        return None
+        #raise ValueError("view parameters are empty")
+    
+    view_name = v_config['view_name']
+    source_table = v_config['source_table']
+    schema_name = v_config['schema_name']
+    definition = v_config['definition']
+    
+    ddl = definition.format(
+        schema_name=schema_name,
+        view_name=view_name,
+        source_table=source_table
+    )
+
+    try:
+        resp = client.execute_statement(
+            WorkgroupName=redshift_conn['workgroup_name'],
+            Database=redshift_conn['database'],
+            Sql=ddl,
+            SecretArn=redshift_conn['secret_arn']
+        )
+        stmt_id = resp["Id"]
+        
+        while True:
+            desc = client.describe_statement(Id=stmt_id)
+            if desc["Status"] == "FINISHED":
+                #log.info(f"Successfully created view '{view_name}'")
+                break
+            if desc["Status"] in ("ABORTED", "FAILED"):
+                raise RuntimeError(desc.get("Error", "view creation failed"))
+            time.sleep(1)
+        return desc
+    except Exception as e:
+        log.error(f"Failed to create view '{view_name}' with error: {e}")
+        raise
+
+def drop_views(config: dict, redshift_conn: dict, client, log):
+    bucket = config['src_bucket']
+    if not bucket:
+        log.error("source bucket is not defined")
+        raise ValueError("source bucket not found")
+    
+    key = "config/view_config.json"
+    if not key:
+        log.error("path for config file is not defined")
+        raise ValueError("path of the view_config is not found")
+    
+    s3 = boto3.client('s3')
+    try:
+        response = s3.get_object(Bucket=bucket, Key=key)
+        json_file = response['Body'].read().decode('utf-8')
+        data = json.loads(json_file)
+    except Exception as e:
+        log.error(f"Failed to download or parse config file from S3: {e}")
+        raise
+    
+    v_config = None
+    for d in data:
+        if d['source_table'] == config['target_table']:
+            v_config = {
+                'source_table': d['source_table'],
+                'view_name': d['view_name'],
+                'schema_name': d['schema_name'],
+                'definition': d['definition']
+            }
+
 # ===============================================================
 # AUDIT TABLE UPDATE
 # ===============================================================
