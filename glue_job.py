@@ -139,12 +139,7 @@ def read_csv_file(config: dict, spark):
     try:
         source_file = f"s3://{config['src_bucket']}/data/in/{config['source_file_name']}"
 
-        df = (
-            spark.read
-                 .option("header", "true")
-                 .option("inferSchema", "true")
-                 .csv(source_file)
-        )
+        df = (spark.read.option("header", "true").option("inferSchema", "true").csv(source_file))
 
         # normalize column names
         for old in df.columns:
