@@ -305,14 +305,31 @@ def _spark_to_redshift_type(data_type) -> str:
     return "VARCHAR(256)"
 
 
-def create_new_redshift_table(config: dict, redshift_conn: dict, df, client):
-    cols_ddls = [f"{field.name} {_spark_to_redshift_type(field.dataType)}" for field in df.schema.fields]
+def create_new_redshift_table(config: dict, redshift_conn: dict, df, client, log):
+    log.info("Target table does not exist; creating")
+    
+    upsert_keys = set(config.get('upsert_keys', []))
+    
+    cols_ddls = []
+    for field in df.schema.fields:
+        col_type = _spark_to_redshift_type(field.dataType)
+        # If this column is in upsert_keys, enforce NOT NULL
+        not_null_clause = " NOT NULL" if field.name in upsert_keys else ""
+        cols_ddls.append(f"{field.name} {col_type}{not_null_clause}")
+    
     ddl = dedent(f"""
         CREATE TABLE IF NOT EXISTS {redshift_conn['schema_name']}.{config['target_table']} (
             {', '.join(cols_ddls)}
         );
     """)
-    execute_sql(ddl, redshift_conn, client)
+    
+    desc = execute_sql(ddl, redshift_conn, client)
+    status = desc.get("Status")
+    if status == "FINISHED":
+        log.info(f"'{config['target_table']}' table successfully created")
+        create_views(config, redshift_conn, client, log)
+        #if desc['Status'] == 'FINISHED':
+            #log.info("view is created successfully")
 
 @retry_on_exception(max_attempts=3, delay_seconds=180, exceptions=(Exception,))
 def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, client, log, spark):
