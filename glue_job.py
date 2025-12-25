@@ -98,7 +98,6 @@ def retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,
                     time.sleep(delay_seconds)
         return wrapper
     return decorator
-
     
 # ===============================================================
 # GLUE INIT
@@ -119,7 +118,6 @@ def _clean_colname(name: str) -> str:
     name = re.sub(r"[^a-z0-9]", "_", name)
     name = re.sub(r"_+", "_", name)
     return name.strip("_")
-
 
 def read_csv_file(config: dict, spark):
     try:
@@ -188,7 +186,6 @@ def _poll_statement(client, stmt_id: str, ctx: str, sleep_s: float = 0.5):
         raise RuntimeError(f"{ctx} failed. Status={status}, Error={err}")
     return desc
 
-
 def execute_sql(sql: str, redshift_conn: dict, client):
     resp = client.execute_statement(
         WorkgroupName=redshift_conn['workgroup_name'],
@@ -243,7 +240,6 @@ def read_redshift_table_schema(config: dict, redshift_conn: dict, spark, client)
     ])
     return spark.createDataFrame([], schema)
 
-
 def check_table_exists(redshift_conn: dict, config: dict, client) -> bool:
     sql = dedent(f"""
         SELECT 1
@@ -261,7 +257,6 @@ def check_table_exists(redshift_conn: dict, config: dict, client) -> bool:
     desc = _poll_statement(client, resp["Id"], ctx="Check table exists")
     result = client.get_statement_result(Id=resp["Id"])  # contains Records
     return bool(result.get("Records"))
-
 
 def _spark_to_redshift_type(data_type) -> str:
     # Prefer unquoted identifiers to avoid case-sensitivity pain in Redshift
@@ -287,7 +282,6 @@ def _spark_to_redshift_type(data_type) -> str:
     if isinstance(data_type, BinaryType):
         return "VARBYTE"
     return "VARCHAR(256)"
-
 
 def create_new_redshift_table(config: dict, redshift_conn: dict, df, client, log):
     log.info("Target table does not exist; creating")
@@ -476,7 +470,6 @@ def get_default_value(dtype):
         return b""
     return None
 
-
 def fill_missing_columns(df, redshift_df):
     src_cols = set(df.columns)
     missed_cols = []
@@ -504,7 +497,6 @@ def create_staging_table(config: dict, redshift_conn: dict, staging_table_name: 
     """)
     execute_sql(ddl, redshift_conn, client)
 
-
 def _find_single_csv_in_prefix(s3_uri: str) -> str:
     """Return the single CSV object key within the given prefix (coalesce(1) write).
     Expects s3_uri as s3://bucket/prefix
@@ -522,7 +514,6 @@ def _find_single_csv_in_prefix(s3_uri: str) -> str:
         raise RuntimeError(f"No CSV objects found under {s3_uri}")
     # choose the smallest alphabetical (there should be only one)
     return f"s3://{bucket}/{sorted(candidates)[0]}"
-
 
 def copy_to_redshift(s3_staging_path: str, redshift_conn: dict, staging_table_name: str, client, log):
     staging = staging_table_name
@@ -568,7 +559,6 @@ def run_merge(config: dict, redshift_conn: dict, staging_table_name : str, clien
         COMMIT;
     """)
     execute_sql(ddl, redshift_conn, client)
-
 
 def get_row_count(config: dict, redshift_conn: dict, client) -> int:
     sql = f"SELECT COUNT(*) FROM {redshift_conn['schema_name']}.{config['target_table']};"
@@ -806,7 +796,6 @@ def move_s3_file_to_archive(config: dict, target_file_path: str, log):
     except Exception as e:
         log.error("Error while moving file", error=str(e))
 
-
 def delete_staging_s3_files(s3_staging_path: str, log):
     s3_client = boto3.client('s3')
     bucket_name, prefix = s3_staging_path.replace("s3://", "").split("/", 1)
@@ -817,7 +806,6 @@ def delete_staging_s3_files(s3_staging_path: str, log):
             log.info(f"Deleted staging file: {obj['Key']}")
     except Exception as e:
         log.error("Error deleting staging files", error=str(e))
-
 
 def move_s3_file_to_unprocessed(config: dict, target_file_path: str, log):
     s3_client = boto3.client('s3')
@@ -839,7 +827,6 @@ def move_s3_file_to_unprocessed(config: dict, target_file_path: str, log):
 # ===============================================================
 # MAIN
 # ===============================================================
-
 def main():
     args = getResolvedOptions(
         sys.argv,
