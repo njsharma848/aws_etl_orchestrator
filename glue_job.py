@@ -351,15 +351,15 @@ def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, cli
             desc = create_views(config, redshift_conn, client, log)
             if desc['Status'] == 'FINISHED':
                 log.info("view is refreshed successfully")
-                
-# VARCHAR length management -----------------------------------------------------
+
+# VARCHAR length management
 
 def get_metadata(config: dict, redshift_conn: dict, client) -> dict:
     sql = dedent(f"""
         SELECT column_name, data_type, character_maximum_length
         FROM SVV_COLUMNS
         WHERE table_schema = '{redshift_conn['schema_name']}'
-          AND table_name   = '{config['target_table']}';
+        AND table_name = '{config['target_table']}';
     """)
     desc = execute_sql(sql, redshift_conn, client)
     rows = client.get_statement_result(Id=desc["Id"]).get("Records", [])
@@ -374,20 +374,62 @@ def get_metadata(config: dict, redshift_conn: dict, client) -> dict:
 @retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,))
 def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     metadata = get_metadata(config, redshift_conn, client)
-    string_cols = [f.name for f in df.schema.fields if isinstance(f.dataType, StringType)]
-    if not string_cols:
+    INT_RANGES = {
+        "smallint": 32767,
+        "int2": 32767,
+        "integer": 2147483647,
+        "int": 2147483647,
+        "int4": 2147483647,
+        "bigint": 9223372036854775807,
+        "int8": 9223372036854775807,
+    }
+
+
+    string_cols = []
+    int_cols = []
+    
+    #Handle string length
+    
+    for f in df.schema.fields:
+        if isinstance(f.dataType, StringType):
+            string_cols.append(f.name)
+        elif isinstance(f.dataType, (IntegerType, LongType, ShortType)):
+            int_cols.append(f.name)
+    
+    if not string_cols and not int_cols:
         return
-    # compute max observed length per string column
-    agg_expr = [F.max(F.length(F.col(c))).alias(c) for c in string_cols]
+    
+    agg_expr = []
+    
+    for c in string_cols:
+        agg_expr.append(F.max(F.length(F.col(c))).alias(c))
+    
+    for c in int_cols:
+        agg_expr.append(F.max(F.abs(F.col(c))).alias(c))
+    
     row = df.agg(*agg_expr).collect()[0]
+
+str_altered_cols = []
     for colname in string_cols:
         src_len = int(row[colname] or 0)
-        curr_len = int(metadata.get(colname, {}).get("length" or 0) or 0)
+        curr_len = int(metadata.get(colname, {}).get("length") or 0)
         if src_len > curr_len:
+            drop_views(config, redshift_conn, client, log)
             new_len = min(src_len + 10, 65535)
-            sql = f"ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} ALTER COLUMN {colname} TYPE VARCHAR({new_len});"
-            execute_sql(sql, redshift_conn, client)
-
+            
+            sql = f"""
+                ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']}
+                ALTER COLUMN {colname} TYPE VARCHAR({new_len});
+            """
+            desc = execute_sql(sql, redshift_conn, client)
+            str_altered_cols.append({"column_name": colname, "source_length": src_len, "current_length": curr_len, "new_length": new_len})
+    
+    if str_altered_cols:
+        log.info(f"columns: {str_altered_cols} are altered with new length")
+        desc = create_views(config, redshift_conn, client, log)
+        if desc['Status'] == 'FINISHED':
+            log.info("view is refreshed successfully")
+    
 # Fill missing columns to match target layout ----------------------------------
 
 def get_default_value(dtype):
