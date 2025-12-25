@@ -79,7 +79,6 @@ def retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,
         def wrapper(*args, **kwargs):
             attempt = 0
 
-            # Try to find a logger object from kwargs or args (duck-typing)
             _log = kwargs.get('log') or kwargs.get('logger')
             if _log is None:
                 for obj in reversed(args):  # look through positional args
