@@ -409,7 +409,7 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     
     row = df.agg(*agg_expr).collect()[0]
 
-str_altered_cols = []
+    str_altered_cols = []
     for colname in string_cols:
         src_len = int(row[colname] or 0)
         curr_len = int(metadata.get(colname, {}).get("length") or 0)
@@ -429,6 +429,56 @@ str_altered_cols = []
         desc = create_views(config, redshift_conn, client, log)
         if desc['Status'] == 'FINISHED':
             log.info("view is refreshed successfully")
+
+# ---- Handle INTEGER widening ----
+int_altered_cols = []
+sufix = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+for colname in int_cols:
+    max_val = int(row[colname] or 0)
+    curr_dtype = metadata.get(colname, {}).get("dtype")
+    
+    if not curr_dtype or curr_dtype not in INT_RANGES:
+        continue
+    
+    curr_max = INT_RANGES[curr_dtype]
+    
+    if max_val > curr_max:
+        int_altered_cols.append((colname, curr_dtype))
+        if curr_dtype in ("smallint", "int2"):
+            new_type = "INTEGER"
+        elif curr_dtype in ("integer", "int", "int4"):
+            new_type = "BIGINT"
+        else:
+            continue  # already BIGINT
+        #drop view before altering the redshift table
+        drop_views(config, redshift_conn, client, log)
+
+    add_sql = f"""
+        ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} ADD COLUMN sample_col {new_type};"""
+    set_sql = f"""
+        UPDATE {redshift_conn['schema_name']}.{config['target_table']} SET sample_col = {colname}:{new_type};"""
+    drop_sql = f"""
+        ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} DROP COLUMN {colname};"""
+    rename_sql = f"""
+        ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} RENAME COLUMN sample_col TO {colname};"""
+    
+    desc = execute_sql(add_sql, redshift_conn, client)
+    if desc['Status'] == 'FINISHED':
+        desc = execute_sql(set_sql, redshift_conn, client)
+        if desc['Status'] == 'FINISHED':
+            desc = execute_sql(drop_sql, redshift_conn, client)
+            if desc['Status'] == 'FINISHED':
+                desc = execute_sql(rename_sql, redshift_conn, client)
+
+
+    
+    int_altered_cols.append({"column_name": colname, "current_datatype": curr_dtype, "new_datatype": new_type})
+
+if int_altered_cols:
+    log.info(f"columns: {int_altered_cols} are altered with new datatype")
+    desc = create_views(config, redshift_conn, client, log)
+    if desc['Status'] == 'FINISHED':
+        log.info("view is refreshed successfully")
     
 # Fill missing columns to match target layout ----------------------------------
 
