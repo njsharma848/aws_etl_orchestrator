@@ -147,6 +147,33 @@ def read_csv_file(config: dict, spark):
             if old != new:
                 df = df.withColumnRenamed(old, new)
 
+        df1 = (spark.read.option("header", "true").option("inferSchema", "true").csv(source_file))
+
+        for old in df1.columns:
+            new = _clean_colname(old)
+            if old != new:
+                df1 = df1.withColumnRenamed(old, new)
+
+        def cast_like(df, df1, config: dict):
+            out_cols = []
+            ref_fields = {f.name: f.dataType for f in df1.schema.fields}
+            upsert_keys = [i.lower() for i in config['upsert_keys']]
+            for name, dtype in ref_fields.items():
+                if isinstance(dtype, T.DoubleType):
+                    if name in df.columns and name in upsert_keys:
+                        out_cols.append(F.col(name))
+                    else:
+                        out_cols.append(F.col(name).cast(T.DecimalType(38, 18)).alias(name))
+                else:
+                    if name in df.columns:
+                        out_cols.append(F.col(name).cast(dtype).alias(name))
+                    else:
+                        out_cols.append(F.lit(None).cast(dtype).alias(name))
+            
+            return df.select(*out_cols)
+
+        df = cast_like(df, df1, config)
+
         run_ts = datetime.now(timezone.utc)
         file_name = source_file.split("/")[-1]
 
@@ -155,30 +182,6 @@ def read_csv_file(config: dict, spark):
               .withColumn("file_name", lit(file_name))
         )
 
-        length_exprs = [
-            max_(length(col(c).cast("string"))).alias(c)
-            for c in config['upsert_keys']
-            if c in df.columns
-        ]
-
-        if length_exprs:
-            max_lengths = df.select(*length_exprs).first().asDict()
-
-            for colm, max_len in max_lengths.items():
-                if max_len is not None and max_len > 8:
-                    from pyspark.sql.functions import monotonically_increasing_id
-                    uniq_col = config['upsert_keys'][0]
-                    df1 = (spark.read.option("header", "true").option("inferSchema", "false").csv(source_file))
-                    for old in df1.columns:
-                        new = _clean_colname(old)
-                        if old != new:
-                            df1 = df1.withColumnRenamed(old, new)
-                    df1=df1.select(uniq_col)
-
-        if df1 is not None:
-            df = df.withColumn("_id", monotonically_increasing_id())
-            df1 = df1.withColumn("_id", monotonically_increasing_id())
-            df = df.drop(uniq_col).join(df1, "_id").drop("_id")
         return df
 
     except Exception as e:
