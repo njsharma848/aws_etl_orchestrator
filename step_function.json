@@ -13,7 +13,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::glue:startJobRun.sync",
             "Parameters": {
-              "JobName": "sample",
+              "JobName": "ingestion",
               "Arguments": {
                 "--job_id.$": "$.job_id",
                 "--job_name.$": "$.job_name",
