@@ -845,6 +845,23 @@ def delete_staging_s3_files(s3_staging_path: str, log):
     except Exception as e:
         log.error("Error deleting staging files", error=str(e))
 
+def move_s3_file_to_unprocessed(config: dict, target_file_path: str, log):
+    s3_client = boto3.client('s3')
+    source_file_path = f"s3://{config['src_bucket']}/data/in/{config['source_file_name']}"
+    source_bucket, source_key = source_file_path.replace("s3://", "").split("/", 1)
+    target_bucket, target_key = target_file_path.replace("s3://", "").split("/", 1)
+    try:
+        s3_client.copy_object(
+            Bucket=target_bucket,
+            CopySource={'Bucket': source_bucket, 'Key': source_key},
+            Key=target_key
+        )
+        log.info(f"File copied from {source_file_path} to {target_file_path}")
+        s3_client.delete_object(Bucket=source_bucket, Key=source_key)
+        log.info(f"Original file {source_file_path} deleted.")
+    except Exception as e:
+        log.error("Error while moving file", error=str(e))
+
 # ===============================================================
 # MAIN
 # ===============================================================
@@ -887,6 +904,7 @@ def main():
     source_filename = config['source_file_name']
     log_base_name = f"{source_filename.split('.')[0]}_log_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.txt"
     s3_archive_path = f"s3://{config['src_bucket']}/data/archive/{year}/{month}/{source_filename.split('.')[0]}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.csv"
+    s3_unprocessed_path = f"s3://{config['src_bucket']}/data/unprocessed/{year}/{month}/{source_filename}"
     staging = _clean_colname(config['source_file_name'].split('.')[0])
     s3_staging_path = f"s3://{config['src_bucket']}/data/staging/{config['target_table']}_{staging}/{run_id}"
 
@@ -903,16 +921,19 @@ def main():
             redshift_df = read_redshift_table_schema(config, redshift_conn, spark, client)
             rows_before = get_row_count(config, redshift_conn, client)
 
+            #check_datatype_matching(redshift_df, df, log)
+
             # Reconcile schema
             if set(df.columns) != set(redshift_df.columns):
                 log.info("Reconciling new/missing columns")
 
-                #Alter redshift table(Add new columns) if new columns are added in the source file
-                alter_redshift_table(config, redshift_conn, df, redshift_df, client, log, spark)
-
                 # fill null values for missing columns and align column order
                 df = fill_missing_columns(df, redshift_df)
 
+                #Alter redshift table(Add new columns) if new columns are added in the source file
+                alter_redshift_table(config, redshift_conn, df, redshift_df, client, log, spark)
+
+        
         else:
             log.info("Target table does not exist; creating")
 
@@ -954,7 +975,7 @@ def main():
         log.info("ETL Job Completed Successfully")
 
         # Cleanup
-        # delete_staging_s3_files(s3_staging_path, log)
+        delete_staging_s3_files(s3_staging_path, log)
         move_s3_file_to_archive(config, s3_archive_path, log)
 
         # Export logs
@@ -976,6 +997,7 @@ def main():
             log.error("Failed to record job status", error=str(audit_ex))
         finally:
             try:
+                move_s3_file_to_unprocessed(config, s3_unprocessed_path, log)
                 log.export_to_s3(config['src_bucket'], f"logs/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}", log_base_name)
             except Exception:
                 pass
