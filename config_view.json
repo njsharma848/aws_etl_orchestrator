@@ -1,4 +1,4 @@
-views = [
+[
     {
         "view_name": "aum_revenue_v",
         "source_table": "aum_revenue",
