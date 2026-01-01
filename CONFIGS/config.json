@@ -2,7 +2,7 @@
     {
         "job_id": "job_01",
         "job_name": "Job one",
-        "source_file_path": "s3://invgai/data/in/Products.csv",
+        "source_file_path": "s3://ingestion/data/in/Products.csv",
         "target_table": "products",
         "upsert_keys": ["product_id", "time"],
         "is_active": true
@@ -10,7 +10,7 @@
     {
         "job_id": "job_02",
         "job_name": "Job two",
-        "source_file_path": "s3://invgai/data/in/Customers.csv",
+        "source_file_path": "s3://ingestion/data/in/Customers.csv",
         "target_table": "customers",
         "upsert_keys": ["customer_id", "time"],
         "is_active": true
@@ -18,7 +18,7 @@
     {
         "job_id": "job_03",
         "job_name": "Job three",
-        "source_file_path": "s3://invgai/data/in/Transactions.csv",
+        "source_file_path": "s3://ingestion/data/in/Transactions.csv",
         "target_table": "transactions",
         "upsert_keys": ["transaction_id", "time"],
         "is_active": true

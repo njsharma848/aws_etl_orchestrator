@@ -1,32 +1,20 @@
 [
     {
-        "view_name": "aum_revenue_v",
-        "source_table": "aum_revenue",
-        "schema_name": "anaplan",
+        "view_name": "products_v",
+        "source_table": "products",
+        "schema_name": "operations",
         "definition": "CREATE OR REPLACE VIEW {schema_name}.{view_name} AS SELECT * FROM {schema_name}.{source_table}"
     },
     {
-        "view_name": "expense_v",
-        "source_table": "expense",
-        "schema_name": "anaplan",
+        "view_name": "customers_v",
+        "source_table": "customers",
+        "schema_name": "operations",
         "definition": "CREATE OR REPLACE VIEW {schema_name}.{view_name} AS SELECT * FROM {schema_name}.{source_table}"
     },
     {
-        "view_name": "general_account_invoice_v",
-        "source_table": "general_account_invoice",
-        "schema_name": "anaplan",
-        "definition": "CREATE OR REPLACE VIEW {schema_name}.{view_name} AS SELECT * FROM {schema_name}.{source_table}"
-    },
-    {
-        "view_name": "headcount_v",
-        "source_table": "headcount",
-        "schema_name": "anaplan",
-        "definition": "CREATE OR REPLACE VIEW {schema_name}.{view_name} AS SELECT * FROM {schema_name}.{source_table}"
-    },
-    {
-        "view_name": "revenue_actuals_v",
-        "source_table": "revenue_actuals",
-        "schema_name": "anaplan",
+        "view_name": "transactions_v",
+        "source_table": "transactions",
+        "schema_name": "operations",
         "definition": "CREATE OR REPLACE VIEW {schema_name}.{view_name} AS SELECT * FROM {schema_name}.{source_table}"
     }
 ]
