@@ -13,8 +13,7 @@ from pyspark.sql.types import (
     StructType, StructField, StringType,
     IntegerType, FloatType, DoubleType, LongType, DecimalType,
     BooleanType, TimestampType, DateType, BinaryType,
-    LongType, DecimalType, BooleanType, DataType,
-    TimestampType, BinaryType, ArrayType, MapType
+    ArrayType, MapType
 )
 
 # ===============================================================
@@ -143,11 +142,11 @@ def read_csv_file(config: dict, spark):
             ref_fields = {f.name: f.dataType for f in df1.schema.fields}
             upsert_keys = [i.lower() for i in config['upsert_keys']]
             for name, dtype in ref_fields.items():
-                if isinstance(dtype, T.DoubleType):
+                if isinstance(dtype, DoubleType):
                     if name in df.columns and name in upsert_keys:
                         out_cols.append(F.col(name))
                     else:
-                        out_cols.append(F.col(name).cast(T.DecimalType(38, 18)).alias(name))
+                        out_cols.append(F.col(name).cast(DecimalType(38, 18)).alias(name))
                 else:
                     if name in df.columns:
                         out_cols.append(F.col(name).cast(dtype).alias(name))
@@ -306,8 +305,6 @@ def create_new_redshift_table(config: dict, redshift_conn: dict, df, client, log
     if status == "FINISHED":
         log.info(f"'{config['target_table']}' table successfully created")
         create_views(config, redshift_conn, client, log)
-        #if desc['Status'] == 'FINISHED':
-            #log.info("view is created successfully")
 
 @retry_on_exception(max_attempts=3, delay_seconds=180, exceptions=(Exception,))
 def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, client, log, spark):
@@ -327,7 +324,7 @@ def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, cli
         if missed_cols:
             log.info(f"columns: {missed_cols}' are added successfully")
             desc = create_views(config, redshift_conn, client, log)
-            if desc['Status'] == 'FINISHED':
+            if desc and desc.get('Status') == 'FINISHED':
                 log.info("view is refreshed successfully")
 
 # VARCHAR length management
@@ -368,7 +365,7 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     for f in df.schema.fields:
         if isinstance(f.dataType, StringType):
             string_cols.append(f.name)
-        elif isinstance(f.dataType, (IntegerType, LongType, ShortType)):
+        elif isinstance(f.dataType, (IntegerType, LongType)):
             int_cols.append(f.name)
     
     if not string_cols and not int_cols:
@@ -402,12 +399,11 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     if str_altered_cols:
         log.info(f"columns: {str_altered_cols} are altered with new length")
         desc = create_views(config, redshift_conn, client, log)
-        if desc['Status'] == 'FINISHED':
+        if desc and desc.get('Status') == 'FINISHED':
             log.info("view is refreshed successfully")
 
     # ---- Handle INTEGER widening ----
     int_altered_cols = []
-    sufix = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
     for colname in int_cols:
         max_val = int(row[colname] or 0)
         curr_dtype = metadata.get(colname, {}).get("dtype")
@@ -418,20 +414,20 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
         curr_max = INT_RANGES[curr_dtype]
         
         if max_val > curr_max:
-            int_altered_cols.append((colname, curr_dtype))
             if curr_dtype in ("smallint", "int2"):
                 new_type = "INTEGER"
             elif curr_dtype in ("integer", "int", "int4"):
                 new_type = "BIGINT"
             else:
                 continue  # already BIGINT
+            
             #drop view before altering the redshift table
             drop_views(config, redshift_conn, client, log)
 
             add_sql = f"""
                 ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} ADD COLUMN sample_col {new_type};"""
             set_sql = f"""
-                UPDATE {redshift_conn['schema_name']}.{config['target_table']} SET sample_col = {colname}:{new_type};"""
+                UPDATE {redshift_conn['schema_name']}.{config['target_table']} SET sample_col = {colname}::{new_type};"""
             drop_sql = f"""
                 ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} DROP COLUMN {colname};"""
             rename_sql = f"""
@@ -450,7 +446,7 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     if int_altered_cols:
         log.info(f"columns: {int_altered_cols} are altered with new datatype")
         desc = create_views(config, redshift_conn, client, log)
-        if desc['Status'] == 'FINISHED':
+        if desc and desc.get('Status') == 'FINISHED':
             log.info("view is refreshed successfully")
 
 # Fill missing columns to match target layout ----------------------------------
@@ -469,7 +465,7 @@ def get_default_value(dtype):
         return b""
     return None
 
-def fill_missing_columns(df, redshift_df):
+def fill_missing_columns(df, redshift_df, log):
     src_cols = set(df.columns)
     missed_cols = []
     for colf in redshift_df.schema.fields:
@@ -615,9 +611,8 @@ def create_views(config: dict, redshift_conn: dict, client, log):
             }
     
     if not v_config:
-        log.error("No configuration found for the target table")
+        log.info("No configuration found for the target table")
         return None
-        #raise ValueError("view parameters are empty")
     
     view_name = v_config['view_name']
     source_table = v_config['source_table']
@@ -642,7 +637,6 @@ def create_views(config: dict, redshift_conn: dict, client, log):
         while True:
             desc = client.describe_statement(Id=stmt_id)
             if desc["Status"] == "FINISHED":
-                #log.info(f"Successfully created view '{view_name}'")
                 break
             if desc["Status"] in ("ABORTED", "FAILED"):
                 raise RuntimeError(desc.get("Error", "view creation failed"))
@@ -683,13 +677,11 @@ def drop_views(config: dict, redshift_conn: dict, client, log):
             }
 
     if not v_config:
-        log.error("No configuration found for the target table")
-        raise ValueError("view parameters are empty")
+        log.info("No configuration found for the target table")
+        return None
     
     view_name = v_config['view_name']
-    source_table = v_config['source_table']
     schema_name = v_config['schema_name']
-    definition = v_config['definition']
     
     ddl = f"""DROP VIEW IF EXISTS {schema_name}.{view_name}"""
 
@@ -705,46 +697,14 @@ def drop_views(config: dict, redshift_conn: dict, client, log):
         while True:
             desc = client.describe_statement(Id=stmt_id)
             if desc["Status"] == "FINISHED":
-                #log.info(f"Successfully created view '{view_name}'")
                 break
             if desc["Status"] in ("ABORTED", "FAILED"):
-                raise RuntimeError(desc.get("Error", "view creation failed"))
+                raise RuntimeError(desc.get("Error", "view drop failed"))
             time.sleep(1)
         return desc
     except Exception as e:
-        print(f"Failed to drop view '{view_name}' with error: {e}")
+        log.error(f"Failed to drop view '{view_name}' with error: {e}")
         raise
-
-#====================================================
-#check data type between df and redshift dataframe
-#====================================================
-def check_datatype_matching(redshift_df, df, log):
-    # Build a lookup: column_name -> dataType
-    log.info("checking for datatype mismatch between source file and redshift table")
-    redshift_cols = {field.name: field.dataType for field in redshift_df.schema.fields}
-    
-    non_numeric_types = (
-        StringType, BooleanType, BinaryType, DateType, TimestampType,
-        ArrayType, MapType, StructType
-    )
-    
-    numeric_types = (
-        ByteType, ShortType, IntegerType, LongType,
-        FloatType, DoubleType, DecimalType
-    )
-    
-    for field in df.schema.fields:
-        if field.name in redshift_cols:
-            src_type = type(field.dataType)
-            tgt_type = type(redshift_cols[field.name])
-
-            non_null_count = df.select(count(field.name)).collect()[0][0]
-            if issubclass(src_type, non_numeric_types) and issubclass(tgt_type, numeric_types) and non_null_count != 0:
-                msg = (
-                    f"Datatype mismatch for column '{field.name}': "
-                    f"source={src_type.__name__}, target={tgt_type.__name__}"
-                )
-                raise Exception(msg)
 
 # ===============================================================
 # AUDIT TABLE UPDATE
@@ -824,6 +784,392 @@ def move_s3_file_to_unprocessed(config: dict, target_file_path: str, log):
         log.error("Error while moving file", error=str(e))
 
 # ===============================================================
+# DIMENSIONAL MODEL CONFIG LOADER
+# ===============================================================
+def load_dimensional_config(bucket: str, config_key: str = "config/dimensional_mappings.json"):
+    """Load dimensional model configuration from S3"""
+    s3 = boto3.client('s3')
+    try:
+        response = s3.get_object(Bucket=bucket, Key=config_key)
+        config = json.loads(response['Body'].read().decode('utf-8'))
+        return {item['source_table']: item['dimensional_model'] for item in config}
+    except Exception as e:
+        print(f"No dimensional config found or error loading: {e}")
+        return {}
+
+# ===============================================================
+# GENERIC SCD TYPE 2 PROCESSOR
+# ===============================================================
+def process_dimension_from_config(df, dim_config: dict, redshift_conn: dict, 
+                                   spark, client, log):
+    """
+    Process any dimension using config-driven approach (SCD Type 2)
+    """
+    
+    dim_table = dim_config['dimension_table']
+    natural_keys = dim_config['natural_keys']
+    scd_attrs = dim_config.get('scd_attributes', [])
+    col_mappings = dim_config.get('column_mappings', {})
+    
+    log.info(f"Processing SCD Type 2 dimension: {dim_table}")
+    
+    # Apply column mappings (rename source columns to dimension columns)
+    dim_df = df
+    for dim_col, source_col in col_mappings.items():
+        if source_col in df.columns:
+            dim_df = dim_df.withColumnRenamed(source_col, dim_col)
+    
+    # Select only columns needed for dimension
+    dim_columns = list(col_mappings.keys())
+    dim_df = dim_df.select(*[c for c in dim_columns if c in dim_df.columns]).distinct()
+    
+    # Add SCD metadata
+    from pyspark.sql.functions import current_date, current_timestamp
+    dim_df = (dim_df
+        .withColumn("effective_date", current_date())
+        .withColumn("end_date", lit(None).cast(DateType()))
+        .withColumn("is_current", lit(True))
+        .withColumn("version", lit(1))
+        .withColumn("created_date", current_timestamp())
+        .withColumn("updated_date", current_timestamp())
+    )
+    
+    schema = redshift_conn['schema_name']
+    run_id = uuid.uuid4().hex
+    staging_dim = f"stg_{dim_table}_{run_id}"
+    s3_staging_path = f"s3://{redshift_conn['src_bucket']}/data/staging/dimensions/{staging_dim}"
+    
+    # Write to S3
+    dim_df.coalesce(1).write.mode("overwrite") \
+        .option("header", True) \
+        .option("quote", '"') \
+        .csv(s3_staging_path)
+    
+    # Create staging table
+    create_stg_sql = f"""
+        DROP TABLE IF EXISTS {schema}.{staging_dim};
+        CREATE TABLE {schema}.{staging_dim} (LIKE {schema}.{dim_table} INCLUDING DEFAULTS);
+    """
+    execute_sql(create_stg_sql, redshift_conn, client)
+    
+    # COPY to staging
+    copy_sql = f"""
+        COPY {schema}.{staging_dim}
+        FROM '{s3_staging_path}'
+        IAM_ROLE '{redshift_conn['iam_role']}'
+        FORMAT AS CSV
+        DELIMITER ','
+        QUOTE '"'
+        IGNOREHEADER 1;
+    """
+    execute_sql(copy_sql, redshift_conn, client)
+    
+    # Get surrogate key info
+    surrogate_key_col = f"{dim_table.replace('dim_', '')}_key"
+    
+    # SCD Type 2 merge
+    natural_key_join = " AND ".join([f"curr.{k} = stg.{k}" for k in natural_keys])
+    
+    if scd_attrs:
+        scd_change_condition = " OR ".join([
+            f"COALESCE(CAST(curr.{attr} AS VARCHAR), 'NULL') <> COALESCE(CAST(stg.{attr} AS VARCHAR), 'NULL')"
+            for attr in scd_attrs
+        ])
+    else:
+        scd_change_condition = "1=0"  # No SCD tracking
+    
+    merge_sql = f"""
+        BEGIN TRANSACTION;
+        
+        -- Get max surrogate key
+        CREATE TEMP TABLE max_key AS
+        SELECT COALESCE(MAX({surrogate_key_col}), 0) as max_key 
+        FROM {schema}.{dim_table};
+        
+        -- Expire changed records
+        UPDATE {schema}.{dim_table} curr
+        SET end_date = CURRENT_DATE - 1,
+            is_current = FALSE,
+            updated_date = GETDATE()
+        FROM {schema}.{staging_dim} stg
+        WHERE {natural_key_join}
+          AND curr.is_current = TRUE
+          AND ({scd_change_condition});
+        
+        -- Insert new versions (for changed records)
+        INSERT INTO {schema}.{dim_table}
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY {', '.join(natural_keys)}) + 
+                (SELECT max_key FROM max_key) as {surrogate_key_col},
+            stg.{', stg.'.join(dim_columns)},
+            stg.effective_date,
+            stg.end_date,
+            stg.is_current,
+            stg.version,
+            stg.created_date,
+            stg.updated_date
+        FROM {schema}.{staging_dim} stg
+        WHERE EXISTS (
+            SELECT 1 FROM {schema}.{dim_table} curr
+            WHERE {natural_key_join}
+              AND curr.is_current = FALSE
+              AND curr.end_date = CURRENT_DATE - 1
+        );
+        
+        -- Insert completely new records
+        INSERT INTO {schema}.{dim_table}
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY {', '.join(natural_keys)}) + 
+                (SELECT COALESCE(MAX({surrogate_key_col}), 0) FROM {schema}.{dim_table}) 
+                as {surrogate_key_col},
+            stg.{', stg.'.join(dim_columns)},
+            stg.effective_date,
+            stg.end_date,
+            stg.is_current,
+            stg.version,
+            stg.created_date,
+            stg.updated_date
+        FROM {schema}.{staging_dim} stg
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {schema}.{dim_table} curr
+            WHERE {natural_key_join}
+        );
+        
+        DROP TABLE {schema}.{staging_dim};
+        DROP TABLE max_key;
+        
+        COMMIT;
+    """
+    
+    execute_sql(merge_sql, redshift_conn, client)
+    log.info(f"{dim_table} SCD Type 2 processed successfully")
+
+# ===============================================================
+# GENERIC SCD TYPE 1 PROCESSOR
+# ===============================================================
+def process_scd_type1_dimension(df, dim_config: dict, redshift_conn: dict, 
+                                 spark, client, log):
+    """
+    Process SCD Type 1 dimension (overwrites on change, no history)
+    """
+    
+    dim_table = dim_config['dimension_table']
+    natural_keys = dim_config['natural_keys']
+    col_mappings = dim_config.get('column_mappings', {})
+    
+    log.info(f"Processing SCD Type 1 dimension: {dim_table}")
+    
+    # Apply column mappings
+    dim_df = df
+    for dim_col, source_col in col_mappings.items():
+        if source_col in df.columns:
+            dim_df = dim_df.withColumnRenamed(source_col, dim_col)
+    
+    # Select only columns needed
+    dim_columns = list(col_mappings.keys())
+    dim_df = dim_df.select(*[c for c in dim_columns if c in dim_df.columns]).distinct()
+    
+    # Add audit columns (no SCD fields for Type 1)
+    from pyspark.sql.functions import current_timestamp
+    dim_df = dim_df.withColumn("created_date", current_timestamp())
+    
+    schema = redshift_conn['schema_name']
+    run_id = uuid.uuid4().hex
+    staging_dim = f"stg_{dim_table}_{run_id}"
+    s3_staging_path = f"s3://{redshift_conn['src_bucket']}/data/staging/dimensions/{staging_dim}"
+    
+    # Write to S3
+    dim_df.coalesce(1).write.mode("overwrite") \
+        .option("header", True) \
+        .option("quote", '"') \
+        .csv(s3_staging_path)
+    
+    # Create staging table
+    create_stg_sql = f"""
+        DROP TABLE IF EXISTS {schema}.{staging_dim};
+        CREATE TABLE {schema}.{staging_dim} (LIKE {schema}.{dim_table} INCLUDING DEFAULTS);
+    """
+    execute_sql(create_stg_sql, redshift_conn, client)
+    
+    # COPY to staging
+    copy_sql = f"""
+        COPY {schema}.{staging_dim}
+        FROM '{s3_staging_path}'
+        IAM_ROLE '{redshift_conn['iam_role']}'
+        FORMAT AS CSV
+        DELIMITER ','
+        QUOTE '"'
+        IGNOREHEADER 1;
+    """
+    execute_sql(copy_sql, redshift_conn, client)
+    
+    surrogate_key_col = f"{dim_table.replace('dim_', '')}_key"
+    natural_key_join = " AND ".join([f"tgt.{k} = src.{k}" for k in natural_keys])
+    
+    # Build update columns (exclude natural keys and surrogate key)
+    update_cols = [col for col in dim_columns if col not in natural_keys]
+    update_clause = ', '.join([f"{col} = src.{col}" for col in update_cols])
+    
+    # SCD Type 1 MERGE (update existing, insert new)
+    merge_sql = f"""
+        BEGIN TRANSACTION;
+        
+        -- Update existing records (overwrite)
+        UPDATE {schema}.{dim_table} tgt
+        SET {update_clause},
+            updated_date = GETDATE()
+        FROM {schema}.{staging_dim} src
+        WHERE {natural_key_join};
+        
+        -- Insert new records
+        INSERT INTO {schema}.{dim_table}
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY {', '.join(natural_keys)}) + 
+                COALESCE((SELECT MAX({surrogate_key_col}) FROM {schema}.{dim_table}), 0) 
+                as {surrogate_key_col},
+            src.*
+        FROM {schema}.{staging_dim} src
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {schema}.{dim_table} tgt
+            WHERE {natural_key_join}
+        );
+        
+        DROP TABLE {schema}.{staging_dim};
+        
+        COMMIT;
+    """
+    
+    execute_sql(merge_sql, redshift_conn, client)
+    log.info(f"{dim_table} (Type 1) processed successfully")
+
+# ===============================================================
+# GENERIC FACT TABLE PROCESSOR
+# ===============================================================
+def process_fact_from_config(df, fact_config: dict, redshift_conn: dict,
+                               spark, client, log):
+    """
+    Process fact table using config-driven lookups
+    """
+    
+    fact_table = fact_config['fact_table']
+    dim_lookups = fact_config['dimension_lookups']
+    measures = fact_config['measures']
+    measure_mappings = fact_config.get('measure_mappings', {})
+    degen_dims = fact_config.get('degenerate_dimensions', [])
+    degen_mappings = fact_config.get('degenerate_mappings', {})
+    
+    log.info(f"Processing fact: {fact_table}")
+    
+    schema = redshift_conn['schema_name']
+    fact_df = df
+    
+    # Apply measure column mappings (rename source columns to target columns)
+    for target_col, source_col in measure_mappings.items():
+        if source_col in fact_df.columns:
+            fact_df = fact_df.withColumnRenamed(source_col, target_col)
+    
+    # Apply degenerate dimension mappings
+    for target_col, source_col in degen_mappings.items():
+        if source_col in fact_df.columns:
+            fact_df = fact_df.withColumnRenamed(source_col, target_col)
+    
+    # Build select columns list
+    select_cols = []
+    
+    # Add measures
+    for measure in measures:
+        if measure in fact_df.columns:
+            select_cols.append(measure)
+    
+    # Add degenerate dimensions
+    for degen in degen_dims:
+        if degen in fact_df.columns:
+            select_cols.append(degen)
+    
+    # Add natural keys for dimension lookups (needed for JOIN in Redshift)
+    for lookup in dim_lookups:
+        for nat_key in lookup['natural_keys']:
+            if nat_key in fact_df.columns and nat_key not in select_cols:
+                select_cols.append(nat_key)
+    
+    # Add audit columns
+    fact_df = fact_df.withColumn("load_timestamp", F.current_timestamp())
+    select_cols.append("load_timestamp")
+    
+    # Write fact staging to S3
+    run_id = uuid.uuid4().hex
+    staging_fact = f"stg_{fact_table}_{run_id}"
+    s3_staging_path = f"s3://{redshift_conn['src_bucket']}/data/staging/facts/{staging_fact}"
+    
+    fact_df.select(*select_cols).coalesce(1).write.mode("overwrite") \
+        .option("header", True) \
+        .csv(s3_staging_path)
+    
+    # Create staging fact table
+    create_stg_sql = f"""
+        DROP TABLE IF EXISTS {schema}.{staging_fact};
+        CREATE TABLE {schema}.{staging_fact} (LIKE {schema}.{fact_table} INCLUDING DEFAULTS);
+    """
+    execute_sql(create_stg_sql, redshift_conn, client)
+    
+    # COPY to staging
+    copy_sql = f"""
+        COPY {schema}.{staging_fact}
+        FROM '{s3_staging_path}'
+        IAM_ROLE '{redshift_conn['iam_role']}'
+        FORMAT AS CSV
+        DELIMITER ','
+        QUOTE '"'
+        IGNOREHEADER 1;
+    """
+    execute_sql(copy_sql, redshift_conn, client)
+    
+    # Build INSERT with dimension lookups
+    join_clauses = []
+    surrogate_keys = []
+    
+    for lookup in dim_lookups:
+        dim_name = lookup['dimension']
+        nat_keys = lookup['natural_keys']
+        surrogate = lookup['surrogate_key']
+        
+        alias = dim_name.replace('dim_', 'd_')
+        
+        join_condition = " AND ".join([
+            f"stg.{k} = {alias}.{k}" for k in nat_keys
+        ])
+        
+        # Check if dimension has is_current column (SCD Type 2)
+        if dim_name not in ['dim_date', 'dim_version', 'dim_data_source']:
+            current_check = f"AND {alias}.is_current = TRUE"
+        else:
+            current_check = ""
+        
+        join_clauses.append(f"""
+            LEFT JOIN {schema}.{dim_name} {alias}
+                ON {join_condition}
+                {current_check}
+        """)
+        
+        surrogate_keys.append(f"{alias}.{surrogate}")
+    
+    # Build final INSERT
+    all_columns = surrogate_keys + [f"stg.{m}" for m in measures] + \
+                  [f"stg.{d}" for d in degen_dims] + ["stg.load_timestamp"]
+    
+    insert_sql = f"""
+        INSERT INTO {schema}.{fact_table}
+        SELECT {', '.join(all_columns)}
+        FROM {schema}.{staging_fact} stg
+        {' '.join(join_clauses)};
+        
+        DROP TABLE {schema}.{staging_fact};
+    """
+    
+    execute_sql(insert_sql, redshift_conn, client)
+    log.info(f"{fact_table} populated successfully")
+
+# ===============================================================
 # MAIN
 # ===============================================================
 def main():
@@ -851,7 +1197,8 @@ def main():
         'region': args['region'],
         'secret_arn': args['secret_arn'],
         'iam_role': args['iam_role'],
-        'schema_name': args['schema_name']
+        'schema_name': args['schema_name'],
+        'src_bucket': args['src_bucket']  # Added for dimensional processing
     }
 
     run_id = uuid.uuid4().hex
@@ -880,14 +1227,12 @@ def main():
             redshift_df = read_redshift_table_schema(config, redshift_conn, spark, client)
             rows_before = get_row_count(config, redshift_conn, client)
 
-            #check_datatype_matching(redshift_df, df, log)
-
             # Reconcile schema
             if set(df.columns) != set(redshift_df.columns):
                 log.info("Reconciling new/missing columns")
 
                 # fill null values for missing columns and align column order
-                df = fill_missing_columns(df, redshift_df)
+                df = fill_missing_columns(df, redshift_df, log)
 
                 #Alter redshift table(Add new columns) if new columns are added in the source file
                 alter_redshift_table(config, redshift_conn, df, redshift_df, client, log, spark)
@@ -896,7 +1241,7 @@ def main():
             log.info("Target table does not exist; creating")
 
             #Create new table in redshift database based on source DF schema
-            create_new_redshift_table(config, redshift_conn, df, client)
+            create_new_redshift_table(config, redshift_conn, df, client, log)
             rows_before = 0
 
         #Alter varchar length if needed
@@ -917,6 +1262,53 @@ def main():
         copy_to_redshift(s3_staging_path, redshift_conn, staging_table_name, client, log)
         #Run merge and remove staging table after merge
         run_merge(config, redshift_conn, staging_table_name, client, log)
+
+        # ============================================================
+        # DIMENSIONAL MODEL PROCESSING (CONFIG-DRIVEN)
+        # ============================================================
+        
+        # Load dimensional mappings from S3
+        dim_config = load_dimensional_config(config['src_bucket'])
+        
+        # Check if current table has dimensional model config
+        if config['target_table'] in dim_config:
+            log.info(f"Dimensional model found for {config['target_table']}")
+            
+            model_config = dim_config[config['target_table']]
+            
+            # Process dimensions first (SCD Type 1 or Type 2)
+            for dim in model_config.get('dimensions', []):
+                if dim.get('scd_type') == 1:
+                    process_scd_type1_dimension(
+                        df=df,
+                        dim_config=dim,
+                        redshift_conn=redshift_conn,
+                        spark=spark,
+                        client=client,
+                        log=log
+                    )
+                else:  # Default to Type 2
+                    process_dimension_from_config(
+                        df=df,
+                        dim_config=dim,
+                        redshift_conn=redshift_conn,
+                        spark=spark,
+                        client=client,
+                        log=log
+                    )
+            
+            # Then process facts (with surrogate key lookups)
+            for fact in model_config.get('facts', []):
+                process_fact_from_config(
+                    df=df,
+                    fact_config=fact,
+                    redshift_conn=redshift_conn,
+                    spark=spark,
+                    client=client,
+                    log=log
+                )
+            
+            log.info(f"Dimensional model processing completed for {config['target_table']}")
 
         job.commit()
 
