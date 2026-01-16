@@ -1,0 +1,260 @@
+[
+    {
+        "source_table": "aum_revenue",
+        "dimensional_model": {
+            "dimensions": [
+                {
+                    "dimension_table": "dim_fund",
+                    "natural_keys": ["fund_code", "share_class"],
+                    "scd_type": 2,
+                    "scd_attributes": ["fund_name", "fund_family_name", "management_fee", "asset_class", "status"],
+                    "column_mappings": {
+                        "fund_code": "fund_code",
+                        "share_class": "share_class",
+                        "fund_name": "fund_name",
+                        "fund_family_name": "fund_family",
+                        "management_fee": "mgmt_fee_rate",
+                        "asset_class": "asset_class",
+                        "status": "fund_status"
+                    }
+                },
+                {
+                    "dimension_table": "dim_advisor",
+                    "natural_keys": ["advisor_code"],
+                    "scd_type": 2,
+                    "scd_attributes": ["advisor_name", "team_name", "region_name", "status"],
+                    "column_mappings": {
+                        "advisor_code": "advisor_code",
+                        "advisor_name": "advisor_name",
+                        "team_name": "team",
+                        "region_name": "region",
+                        "status": "advisor_status"
+                    }
+                }
+            ],
+            "facts": [
+                {
+                    "fact_table": "fact_aum_revenue",
+                    "fact_type": "transaction",
+                    "dimension_lookups": [
+                        {"dimension": "dim_fund", "natural_keys": ["fund_code", "share_class"], "surrogate_key": "fund_key"},
+                        {"dimension": "dim_advisor", "natural_keys": ["advisor_code"], "surrogate_key": "advisor_key"},
+                        {"dimension": "dim_date", "natural_keys": ["date_key"], "surrogate_key": "date_key"},
+                        {"dimension": "dim_version", "natural_keys": ["version_code"], "surrogate_key": "version_key"}
+                    ],
+                    "measures": ["fee_paying_aum", "reportable_aum", "revenue"],
+                    "measure_mappings": {
+                        "fee_paying_aum": "fee_paying_aum",
+                        "reportable_aum": "reportable_aum",
+                        "revenue": "revenue"
+                    },
+                    "degenerate_dimensions": ["transaction_id"],
+                    "degenerate_mappings": {
+                        "transaction_id": "transaction_id"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "source_table": "revenue_plan_forecast",
+        "dimensional_model": {
+            "dimensions": [
+                {
+                    "dimension_table": "dim_fund",
+                    "natural_keys": ["fund_code", "share_class"],
+                    "scd_type": 2,
+                    "scd_attributes": ["fund_name", "fund_family_name", "asset_class"],
+                    "column_mappings": {
+                        "fund_code": "fund_code",
+                        "share_class": "share_class",
+                        "fund_name": "fund_name",
+                        "fund_family_name": "fund_family",
+                        "asset_class": "asset_class"
+                    }
+                }
+            ],
+            "facts": [
+                {
+                    "fact_table": "fact_revenue_plan",
+                    "fact_type": "periodic_snapshot",
+                    "dimension_lookups": [
+                        {"dimension": "dim_fund", "natural_keys": ["fund_code", "share_class"], "surrogate_key": "fund_key"},
+                        {"dimension": "dim_date", "natural_keys": ["date_key"], "surrogate_key": "date_key"},
+                        {"dimension": "dim_version", "natural_keys": ["version_code"], "surrogate_key": "version_key"}
+                    ],
+                    "measures": ["planned_aum", "planned_revenue"],
+                    "measure_mappings": {
+                        "planned_aum": "planned_aum",
+                        "planned_revenue": "planned_revenue"
+                    },
+                    "degenerate_dimensions": ["plan_id", "scenario"],
+                    "degenerate_mappings": {
+                        "plan_id": "plan_id",
+                        "scenario": "scenario"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "source_table": "expense",
+        "dimensional_model": {
+            "dimensions": [
+                {
+                    "dimension_table": "dim_cost_center",
+                    "natural_keys": ["l4_cost_center_code"],
+                    "scd_type": 2,
+                    "scd_attributes": [
+                        "l4_cost_center_name",
+                        "l3_cost_center_code",
+                        "l3_cost_center_name",
+                        "l2_cost_center_code",
+                        "l2_cost_center_name",
+                        "l1_cost_center_code",
+                        "l1_cost_center_name",
+                        "department"
+                    ],
+                    "column_mappings": {
+                        "l4_cost_center_code": "cost_center_l4",
+                        "l4_cost_center_name": "cost_center_l4_name",
+                        "l3_cost_center_code": "cost_center_l3",
+                        "l3_cost_center_name": "cost_center_l3_name",
+                        "l2_cost_center_code": "cost_center_l2",
+                        "l2_cost_center_name": "cost_center_l2_name",
+                        "l1_cost_center_code": "cost_center_l1",
+                        "l1_cost_center_name": "cost_center_l1_name",
+                        "department": "department"
+                    }
+                }
+            ],
+            "facts": [
+                {
+                    "fact_table": "fact_expense",
+                    "fact_type": "transaction",
+                    "dimension_lookups": [
+                        {"dimension": "dim_cost_center", "natural_keys": ["l4_cost_center_code"], "surrogate_key": "cost_center_key"},
+                        {"dimension": "dim_date", "natural_keys": ["date_key"], "surrogate_key": "date_key"},
+                        {"dimension": "dim_version", "natural_keys": ["version_code"], "surrogate_key": "version_key"}
+                    ],
+                    "measures": ["expense_amount"],
+                    "measure_mappings": {
+                        "expense_amount": "expense_amount"
+                    },
+                    "degenerate_dimensions": ["expense_id", "expense_category"],
+                    "degenerate_mappings": {
+                        "expense_id": "expense_id",
+                        "expense_category": "expense_category"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "source_table": "headcount",
+        "dimensional_model": {
+            "dimensions": [
+                {
+                    "dimension_table": "dim_cost_center",
+                    "natural_keys": ["l4_cost_center_code"],
+                    "scd_type": 2,
+                    "scd_attributes": [
+                        "l4_cost_center_name",
+                        "l3_cost_center_code",
+                        "l2_cost_center_code",
+                        "department"
+                    ],
+                    "column_mappings": {
+                        "l4_cost_center_code": "cost_center_l4",
+                        "l4_cost_center_name": "cost_center_l4_name",
+                        "l3_cost_center_code": "cost_center_l3",
+                        "l2_cost_center_code": "cost_center_l2",
+                        "department": "department"
+                    }
+                }
+            ],
+            "facts": [
+                {
+                    "fact_table": "fact_headcount",
+                    "fact_type": "periodic_snapshot",
+                    "dimension_lookups": [
+                        {"dimension": "dim_cost_center", "natural_keys": ["l4_cost_center_code"], "surrogate_key": "cost_center_key"},
+                        {"dimension": "dim_date", "natural_keys": ["date_key"], "surrogate_key": "date_key"},
+                        {"dimension": "dim_version", "natural_keys": ["version_code"], "surrogate_key": "version_key"}
+                    ],
+                    "measures": ["headcount", "fte"],
+                    "measure_mappings": {
+                        "headcount": "headcount",
+                        "fte": "fte_count"
+                    },
+                    "degenerate_dimensions": ["employee_type"],
+                    "degenerate_mappings": {
+                        "employee_type": "employee_type"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "source_table": "zaum",
+        "dimensional_model": {
+            "dimensions": [],
+            "facts": [
+                {
+                    "fact_table": "fact_zaum",
+                    "fact_type": "periodic_snapshot",
+                    "dimension_lookups": [
+                        {"dimension": "dim_date", "natural_keys": ["date_key"], "surrogate_key": "date_key"},
+                        {"dimension": "dim_version", "natural_keys": ["version_code"], "surrogate_key": "version_key"}
+                    ],
+                    "measures": ["zaum_value"],
+                    "measure_mappings": {
+                        "zaum_value": "zaum_amount"
+                    },
+                    "degenerate_dimensions": ["zaum_category"],
+                    "degenerate_mappings": {
+                        "zaum_category": "category"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "source_table": "general_account_invoice",
+        "dimensional_model": {
+            "dimensions": [
+                {
+                    "dimension_table": "dim_account_type",
+                    "natural_keys": ["account_type_code"],
+                    "scd_type": 1,
+                    "scd_attributes": ["account_type_name", "account_category"],
+                    "column_mappings": {
+                        "account_type_code": "account_type",
+                        "account_type_name": "account_type_name",
+                        "account_category": "account_category"
+                    }
+                }
+            ],
+            "facts": [
+                {
+                    "fact_table": "fact_ga_invoice",
+                    "fact_type": "transaction",
+                    "dimension_lookups": [
+                        {"dimension": "dim_date", "natural_keys": ["date_key"], "surrogate_key": "date_key"},
+                        {"dimension": "dim_version", "natural_keys": ["version_code"], "surrogate_key": "version_key"},
+                        {"dimension": "dim_account_type", "natural_keys": ["account_type_code"], "surrogate_key": "account_type_key"}
+                    ],
+                    "measures": ["invoice_amount"],
+                    "measure_mappings": {
+                        "invoice_amount": "invoice_amount"
+                    },
+                    "degenerate_dimensions": ["invoice_number", "invoice_id"],
+                    "degenerate_mappings": {
+                        "invoice_number": "invoice_number",
+                        "invoice_id": "invoice_id"
+                    }
+                }
+            ]
+        }
+    }
+]
