@@ -158,17 +158,3 @@ CREATE TABLE general_account_invoice (
 ```
 
 ---
-
-## Next Steps
-
-Tables 4-7 have minimal schemas because detailed column information isn't available from prior conversations. To complete these properly:
-
-1. Check the actual CSV files from S3
-2. Review the Glue job schema inference
-3. Provide sample data for verification
-
-**Would you like me to help create a script to extract actual column names from your S3 CSV files?**
-
----
-
-Is there a specific format or structure you'd prefer for this documentation?
