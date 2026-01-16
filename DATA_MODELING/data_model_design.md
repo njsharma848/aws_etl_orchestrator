@@ -1,8 +1,9 @@
-You're right. Let me provide **only the verified columns** from our conversations, and add **only essential missing pieces**:
 
----
+# Anaplan Redshift Table Schemas
 
-## **1. HEADCOUNT** ✓ (Complete)
+## 1. HEADCOUNT ✓
+
+**Status:** Complete - All columns verified
 
 ```sql
 CREATE TABLE headcount (
@@ -18,9 +19,9 @@ CREATE TABLE headcount (
 );
 ```
 
----
+## 2. AUM REVENUE ✓
 
-## **2. AUM REVENUE** ✓ (Complete)
+**Status:** Complete - All columns verified
 
 ```sql
 CREATE TABLE aum_revenue (
@@ -44,9 +45,9 @@ CREATE TABLE aum_revenue (
 );
 ```
 
----
+## 3. REVENUE PLAN/FORECAST ✓
 
-## **3. REVENUE PLAN/FORECAST** ✓ (Complete)
+**Status:** Complete - All columns verified
 
 ```sql
 CREATE TABLE revenue_plan_forecast (
@@ -75,9 +76,9 @@ CREATE TABLE revenue_plan_forecast (
 );
 ```
 
----
+## 4. REVENUE ACTUALS
 
-## **4. REVENUE ACTUALS** (Adding minimal structure)
+**Status:** Minimal structure - Needs column verification
 
 ```sql
 CREATE TABLE revenue_actuals (
@@ -95,9 +96,9 @@ CREATE TABLE revenue_actuals (
 );
 ```
 
----
+## 5. EXPENSE
 
-## **5. EXPENSE** (Adding minimal structure)
+**Status:** Minimal structure - Needs column verification
 
 ```sql
 CREATE TABLE expense (
@@ -118,9 +119,9 @@ CREATE TABLE expense (
 );
 ```
 
----
+## 6. ZAUM
 
-## **6. ZAUM** (Adding minimal structure)
+**Status:** Minimal structure - Needs column verification
 
 ```sql
 CREATE TABLE zaum (
@@ -137,9 +138,9 @@ CREATE TABLE zaum (
 );
 ```
 
----
+## 7. GENERAL ACCOUNT INVOICE
 
-## **7. GENERAL ACCOUNT INVOICE** (Adding minimal structure)
+**Status:** Minimal structure - Needs column verification
 
 ```sql
 CREATE TABLE general_account_invoice (
@@ -158,10 +159,16 @@ CREATE TABLE general_account_invoice (
 
 ---
 
-**Note:** Tables 4-7 have minimal schemas because I don't have detailed column information from our conversations. To complete these properly, you'll need to:
+## Next Steps
+
+Tables 4-7 have minimal schemas because detailed column information isn't available from prior conversations. To complete these properly:
 
 1. Check the actual CSV files from S3
 2. Review the Glue job schema inference
-3. Or provide sample data
+3. Provide sample data for verification
 
-Would you like me to help create a script to extract actual column names from your S3 CSV files?
+**Would you like me to help create a script to extract actual column names from your S3 CSV files?**
+
+---
+
+Is there a specific format or structure you'd prefer for this documentation?
