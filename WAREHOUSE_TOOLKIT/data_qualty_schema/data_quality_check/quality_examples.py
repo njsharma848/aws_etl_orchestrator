@@ -9,7 +9,7 @@ from pyspark.sql.types import *
 from datetime import datetime, timedelta
 import random
 
-from schema_evolution import SchemaEvolutionManager, EvolutionStrategy
+from WAREHOUSE_TOOLKIT.data_qualty_schema.schema_evolutions.schema_evolution import SchemaEvolutionManager, EvolutionStrategy
 from data_quality import DataQualityFramework
 
 

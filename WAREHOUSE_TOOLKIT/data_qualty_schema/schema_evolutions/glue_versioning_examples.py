@@ -9,7 +9,7 @@ from pyspark.sql.types import *
 from datetime import datetime
 import json
 
-from glue_schema_versioning import (
+from WAREHOUSE_TOOLKIT.data_qualty_schema.schema_evolutions.glue_schema_versioning import (
     SchemaVersionManager,
     GlueCatalogSchemaManager,
     IntegratedSchemaEvolution
