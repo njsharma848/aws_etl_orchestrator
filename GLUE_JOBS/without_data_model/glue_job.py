@@ -8,13 +8,12 @@ from awsglue.utils import getResolvedOptions
 from awsglue.job import Job
 from pyspark.context import SparkContext
 from pyspark.sql import functions as F
-from pyspark.sql.functions import col, length, max as max_, lit, regexp_replace, concat
+from pyspark.sql.functions import col, length, max as max_, lit, regexp_replace, concat, count
 from pyspark.sql.types import (
     StructType, StructField, StringType,
     IntegerType, FloatType, DoubleType, LongType, DecimalType,
     BooleanType, TimestampType, DateType, BinaryType,
-    LongType, DecimalType, BooleanType, DataType,
-    TimestampType, BinaryType, ArrayType, MapType
+    ShortType, ByteType, DataType, ArrayType, MapType
 )
 
 # ===============================================================
@@ -131,32 +130,25 @@ def read_csv_file(config: dict, spark):
             if old != new:
                 df = df.withColumnRenamed(old, new)
 
-        df1 = (spark.read.option("header", "true").option("inferSchema", "true").csv(source_file))
-
-        for old in df1.columns:
-            new = _clean_colname(old)
-            if old != new:
-                df1 = df1.withColumnRenamed(old, new)
-
-        def cast_like(df, df1, config: dict):
+        def cast_like(df, config: dict):
             out_cols = []
-            ref_fields = {f.name: f.dataType for f in df1.schema.fields}
+            ref_fields = {f.name: f.dataType for f in df.schema.fields}
             upsert_keys = [i.lower() for i in config['upsert_keys']]
             for name, dtype in ref_fields.items():
-                if isinstance(dtype, T.DoubleType):
+                if isinstance(dtype, DoubleType):
                     if name in df.columns and name in upsert_keys:
                         out_cols.append(F.col(name))
                     else:
-                        out_cols.append(F.col(name).cast(T.DecimalType(38, 18)).alias(name))
+                        out_cols.append(F.col(name).cast(DecimalType(38, 18)).alias(name))
                 else:
                     if name in df.columns:
                         out_cols.append(F.col(name).cast(dtype).alias(name))
                     else:
                         out_cols.append(F.lit(None).cast(dtype).alias(name))
-            
+
             return df.select(*out_cols)
 
-        df = cast_like(df, df1, config)
+        df = cast_like(df, config)
 
         run_ts = datetime.now(timezone.utc)
         file_name = source_file.split("/")[-1]
@@ -311,14 +303,14 @@ def create_new_redshift_table(config: dict, redshift_conn: dict, df, client, log
 
 @retry_on_exception(max_attempts=3, delay_seconds=180, exceptions=(Exception,))
 def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, client, log, spark):
-    df = read_redshift_table_schema(config, redshift_conn, spark, client)
-    if set(df.columns) != set(redshift_df.columns):
+    source_df = read_redshift_table_schema(config, redshift_conn, spark, client)
+    if set(source_df.columns) != set(redshift_df.columns):
         #drop view
         drop_views(config, redshift_conn, client, log)
         
         target_cols = [c.name for c in redshift_df.schema.fields]
         missed_cols = []
-        for colf in df.schema.fields:
+        for colf in source_df.schema.fields:
             if colf.name not in target_cols:
                 missed_cols.append(colf.name)
                 rtype = _spark_to_redshift_type(colf.dataType)
@@ -418,7 +410,6 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
         curr_max = INT_RANGES[curr_dtype]
         
         if max_val > curr_max:
-            int_altered_cols.append((colname, curr_dtype))
             if curr_dtype in ("smallint", "int2"):
                 new_type = "INTEGER"
             elif curr_dtype in ("integer", "int", "int4"):
@@ -469,7 +460,7 @@ def get_default_value(dtype):
         return b""
     return None
 
-def fill_missing_columns(df, redshift_df):
+def fill_missing_columns(df, redshift_df, log):
     src_cols = set(df.columns)
     missed_cols = []
     for colf in redshift_df.schema.fields:
@@ -479,7 +470,7 @@ def fill_missing_columns(df, redshift_df):
             df = df.withColumn(colf.name, lit(default_value))
     if missed_cols:
         log.info(f"columns: {missed_cols} filled with null values")
-        
+
     return df
 
 # ===============================================================
@@ -522,7 +513,7 @@ def copy_to_redshift(s3_staging_path: str, redshift_conn: dict, staging_table_na
     s3_single_file = _find_single_csv_in_prefix(s3_staging_path)
     ddl = dedent(f"""
         COPY {schema}.{staging}
-        FROM '{s3_staging_path}'
+        FROM '{s3_single_file}'
         IAM_ROLE '{redshift_conn['iam_role']}'
         FORMAT AS CSV
         TIMEFORMAT 'auto'
@@ -582,19 +573,15 @@ def get_row_count(config: dict, redshift_conn: dict, client) -> int:
     raise ValueError(f"Unexpected count cell format: {first_cell}")
 
 #====================================================
-#create view
+# view config helper
 #====================================================
-def create_views(config: dict, redshift_conn: dict, client, log):
+def _load_view_config(config: dict, log):
     bucket = config['src_bucket']
     if not bucket:
         log.error("source bucket is not defined")
         raise ValueError("source bucket not found")
-    
+
     key = "config/view_config.json"
-    if not key:
-        log.error("path for config file is not defined")
-        raise ValueError("path of the view_config is not found")
-    
     s3 = boto3.client('s3')
     try:
         response = s3.get_object(Bucket=bucket, Key=key)
@@ -613,17 +600,22 @@ def create_views(config: dict, redshift_conn: dict, client, log):
                 'schema_name': d['schema_name'],
                 'definition': d['definition']
             }
-    
+    return v_config
+
+#====================================================
+#create view
+#====================================================
+def create_views(config: dict, redshift_conn: dict, client, log):
+    v_config = _load_view_config(config, log)
     if not v_config:
         log.error("No configuration found for the target table")
         return None
-        #raise ValueError("view parameters are empty")
-    
+
     view_name = v_config['view_name']
-    source_table = v_config['source_table']
     schema_name = v_config['schema_name']
+    source_table = v_config['source_table']
     definition = v_config['definition']
-    
+
     ddl = definition.format(
         schema_name=schema_name,
         view_name=view_name,
@@ -638,11 +630,10 @@ def create_views(config: dict, redshift_conn: dict, client, log):
             SecretArn=redshift_conn['secret_arn']
         )
         stmt_id = resp["Id"]
-        
+
         while True:
             desc = client.describe_statement(Id=stmt_id)
             if desc["Status"] == "FINISHED":
-                #log.info(f"Successfully created view '{view_name}'")
                 break
             if desc["Status"] in ("ABORTED", "FAILED"):
                 raise RuntimeError(desc.get("Error", "view creation failed"))
@@ -653,44 +644,14 @@ def create_views(config: dict, redshift_conn: dict, client, log):
         raise
 
 def drop_views(config: dict, redshift_conn: dict, client, log):
-    bucket = config['src_bucket']
-    if not bucket:
-        log.error("source bucket is not defined")
-        raise ValueError("source bucket not found")
-    
-    key = "config/view_config.json"
-    if not key:
-        log.error("path for config file is not defined")
-        raise ValueError("path of the view_config is not found")
-    
-    s3 = boto3.client('s3')
-    try:
-        response = s3.get_object(Bucket=bucket, Key=key)
-        json_file = response['Body'].read().decode('utf-8')
-        data = json.loads(json_file)
-    except Exception as e:
-        log.error(f"Failed to download or parse config file from S3: {e}")
-        raise
-    
-    v_config = None
-    for d in data:
-        if d['source_table'] == config['target_table']:
-            v_config = {
-                'source_table': d['source_table'],
-                'view_name': d['view_name'],
-                'schema_name': d['schema_name'],
-                'definition': d['definition']
-            }
-
+    v_config = _load_view_config(config, log)
     if not v_config:
         log.error("No configuration found for the target table")
         raise ValueError("view parameters are empty")
-    
+
     view_name = v_config['view_name']
-    source_table = v_config['source_table']
     schema_name = v_config['schema_name']
-    definition = v_config['definition']
-    
+
     ddl = f"""DROP VIEW IF EXISTS {schema_name}.{view_name}"""
 
     try:
@@ -705,14 +666,13 @@ def drop_views(config: dict, redshift_conn: dict, client, log):
         while True:
             desc = client.describe_statement(Id=stmt_id)
             if desc["Status"] == "FINISHED":
-                #log.info(f"Successfully created view '{view_name}'")
                 break
             if desc["Status"] in ("ABORTED", "FAILED"):
-                raise RuntimeError(desc.get("Error", "view creation failed"))
+                raise RuntimeError(desc.get("Error", "view drop failed"))
             time.sleep(1)
         return desc
     except Exception as e:
-        print(f"Failed to drop view '{view_name}' with error: {e}")
+        log.error(f"Failed to drop view '{view_name}' with error: {e}")
         raise
 
 #====================================================
@@ -887,7 +847,7 @@ def main():
                 log.info("Reconciling new/missing columns")
 
                 # fill null values for missing columns and align column order
-                df = fill_missing_columns(df, redshift_df)
+                df = fill_missing_columns(df, redshift_df, log)
 
                 #Alter redshift table(Add new columns) if new columns are added in the source file
                 alter_redshift_table(config, redshift_conn, df, redshift_df, client, log, spark)
@@ -896,7 +856,7 @@ def main():
             log.info("Target table does not exist; creating")
 
             #Create new table in redshift database based on source DF schema
-            create_new_redshift_table(config, redshift_conn, df, client)
+            create_new_redshift_table(config, redshift_conn, df, client, log)
             rows_before = 0
 
         #Alter varchar length if needed
@@ -943,13 +903,12 @@ def main():
         log.error("ETL FAILED", error=str(e))
         traceback.print_exc()
         try:
-            # best-effort: record failure status
+            # best-effort: record failure status (use records_read from outer scope if available)
             run_end_ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            df = read_csv_file(config, spark)
-            records_read = df.count()
+            fail_records_read = records_read if 'records_read' in dir() else 0
             update_job_sts_table(
                 config, redshift_conn, run_start_ts, run_end_ts, source_filename,
-                records_read, 0, 0, "FAILED", str(e), client
+                fail_records_read, 0, 0, "FAILED", str(e), client
             )
         except Exception as audit_ex:
             log.error("Failed to record job status", error=str(audit_ex))
