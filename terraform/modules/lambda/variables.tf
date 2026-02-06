@@ -38,6 +38,11 @@ variable "s3_bucket_arn" {
   type        = string
 }
 
+variable "sqs_queue_arn" {
+  description = "ARN of the SQS FIFO queue that triggers the orchestrator Lambda"
+  type        = string
+}
+
 variable "sftp_secret_name" {
   description = "Secrets Manager secret name holding SFTP credentials"
   type        = string

@@ -26,3 +26,13 @@ output "sns_topic_arn" {
   description = "ARN of the SNS notification topic."
   value       = module.sns.topic_arn
 }
+
+output "sqs_queue_url" {
+  description = "URL of the SQS FIFO ingestion queue."
+  value       = module.sqs.queue_url
+}
+
+output "sqs_dlq_url" {
+  description = "URL of the SQS dead-letter queue."
+  value       = module.sqs.dlq_url
+}

@@ -87,6 +87,20 @@ data "aws_iam_policy_document" "lambda_orchestrator" {
     ]
   }
 
+  # SQS - consume messages from ingestion queue
+  statement {
+    sid    = "SQSConsume"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+    ]
+    resources = [
+      var.sqs_queue_arn,
+    ]
+  }
+
   # CloudWatch Logs
   statement {
     sid    = "CloudWatchLogs"

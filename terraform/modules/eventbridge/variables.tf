@@ -17,13 +17,8 @@ variable "s3_bucket_name" {
   type        = string
 }
 
-variable "lambda_orchestrator_arn" {
-  description = "ARN of the Lambda orchestrator function"
-  type        = string
-}
-
-variable "lambda_orchestrator_function_name" {
-  description = "Name of the Lambda orchestrator function"
+variable "sqs_queue_arn" {
+  description = "ARN of the SQS FIFO queue to receive ingestion events"
   type        = string
 }
 

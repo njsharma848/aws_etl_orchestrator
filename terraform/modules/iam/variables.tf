@@ -39,6 +39,12 @@ variable "secret_arn" {
   type        = string
 }
 
+variable "sqs_queue_arn" {
+  description = "ARN of the SQS FIFO queue for ingestion events."
+  type        = string
+  default     = "*"
+}
+
 variable "tags" {
   description = "Map of tags to apply to all IAM resources."
   type        = map(string)

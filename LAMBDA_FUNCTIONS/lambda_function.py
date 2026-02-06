@@ -114,13 +114,35 @@ def find_matching_job(job_configurations, s3_object_key):
 
 
 # -------------------------------------------------
+# Event parsing helpers
+# -------------------------------------------------
+
+def _extract_s3_event(event):
+    """
+    Parse the S3 event detail from either:
+      - SQS trigger (EventBridge event wrapped in SQS message body)
+      - Direct EventBridge invocation (backward-compatible)
+    """
+    if "Records" in event:
+        # SQS-triggered: EventBridge event is JSON-encoded in the message body
+        sqs_record = event["Records"][0]
+        eb_event = json.loads(sqs_record["body"])
+    else:
+        # Direct EventBridge invocation (fallback / local testing)
+        eb_event = event
+
+    bucket_name = eb_event["detail"]["bucket"]["name"]
+    object_key = eb_event["detail"]["object"]["key"]
+    return bucket_name, object_key
+
+
+# -------------------------------------------------
 # Lambda entry point (WHEN & WHY)
 # -------------------------------------------------
 
 def lambda_handler(event, context):
 
-    bucket_name = event["detail"]["bucket"]["name"]
-    object_key = event["detail"]["object"]["key"]
+    bucket_name, object_key = _extract_s3_event(event)
     file_name = object_key.split("/")[-1]
 
     print(f"Processing file: {file_name}")

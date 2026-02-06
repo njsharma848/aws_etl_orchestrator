@@ -58,9 +58,10 @@ class LogBuffer:
         return f"s3://{bucket}/{key}"
 
 #======================================
-# retry logic
+# retry logic (exponential backoff)
 #===================================
-def retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,)):
+def retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,)):
+    """Retry with exponential backoff: base_delay * 2^(attempt-1), capped at max_delay."""
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -84,17 +85,18 @@ def retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,
                         else:
                             print(f"{func.__name__} failed after {attempt} attempts: {e}")
                         raise
+                    wait = min(base_delay * (2 ** (attempt - 1)), max_delay)
                     if _log:
                         _log.warning(
                             f"{func.__name__} failed with {type(e).__name__}: {e}. "
-                            f"Retrying in {delay_seconds} seconds (attempt {attempt}/{max_attempts})..."
+                            f"Retrying in {wait}s (attempt {attempt}/{max_attempts})..."
                         )
                     else:
                         print(
                             f"{func.__name__} failed with {type(e).__name__}: {e}. "
-                            f"Retrying in {delay_seconds} seconds (attempt {attempt}/{max_attempts})..."
+                            f"Retrying in {wait}s (attempt {attempt}/{max_attempts})..."
                         )
-                    time.sleep(delay_seconds)
+                    time.sleep(wait)
         return wrapper
     return decorator
     
@@ -301,7 +303,7 @@ def create_new_redshift_table(config: dict, redshift_conn: dict, df, client, log
         #if desc['Status'] == 'FINISHED':
             #log.info("view is created successfully")
 
-@retry_on_exception(max_attempts=3, delay_seconds=180, exceptions=(Exception,))
+@retry_on_exception(max_attempts=3, base_delay=5, max_delay=60, exceptions=(Exception,))
 def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, client, log, spark):
     source_df = read_redshift_table_schema(config, redshift_conn, spark, client)
     if set(source_df.columns) != set(redshift_df.columns):
@@ -340,7 +342,7 @@ def get_metadata(config: dict, redshift_conn: dict, client) -> dict:
         meta[colname] = {"dtype": dtype, "length": length}
     return meta
 
-@retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,))
+@retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,))
 def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     metadata = get_metadata(config, redshift_conn, client)
     INT_RANGES = {
@@ -526,7 +528,7 @@ def copy_to_redshift(s3_staging_path: str, redshift_conn: dict, staging_table_na
 # ===============================================================
 # MERGE (delete+insert) with transaction
 # ===============================================================
-@retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,))
+@retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,))
 def run_merge(config: dict, redshift_conn: dict, staging_table_name : str, client, log):
     
     keys = config['upsert_keys']

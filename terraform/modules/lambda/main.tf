@@ -18,6 +18,9 @@ resource "aws_lambda_function" "orchestrator" {
   filename         = data.archive_file.orchestrator.output_path
   source_code_hash = data.archive_file.orchestrator.output_base64sha256
 
+  # Limit to 1 concurrent execution so SQS FIFO processes files sequentially
+  reserved_concurrent_executions = 1
+
   environment {
     variables = {
       SNS_TOPIC_ARN     = var.sns_topic_arn
@@ -32,6 +35,15 @@ resource "aws_cloudwatch_log_group" "orchestrator" {
   name              = "/aws/lambda/${aws_lambda_function.orchestrator.function_name}"
   retention_in_days = 30
   tags              = var.tags
+}
+
+# SQS FIFO -> Lambda event source mapping (batch_size=1 for one-at-a-time)
+resource "aws_lambda_event_source_mapping" "sqs_to_orchestrator" {
+  event_source_arn                   = var.sqs_queue_arn
+  function_name                      = aws_lambda_function.orchestrator.arn
+  batch_size                         = 1
+  maximum_batching_window_in_seconds = 0
+  enabled                            = true
 }
 
 ###############################################################################

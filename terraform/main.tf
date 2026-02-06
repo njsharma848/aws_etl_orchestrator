@@ -1,8 +1,10 @@
 ###############################################################################
 # Root Module - ETL Orchestrator Pipeline
 #
+# Architecture: S3 -> EventBridge -> SQS FIFO -> Lambda -> Step Functions -> Glue
+#
 # This root module wires together all sub-modules that compose the ETL
-# pipeline: SNS notifications, S3 storage, IAM roles, Glue jobs,
+# pipeline: SNS notifications, S3 storage, SQS queue, IAM roles, Glue jobs,
 # Step Functions state machine, Lambda functions, and EventBridge rules.
 ###############################################################################
 
@@ -36,18 +38,43 @@ module "s3" {
 }
 
 # ------------------------------------------------------------------------------
+# EventBridge - S3 event rule that routes to SQS FIFO
+# ------------------------------------------------------------------------------
+module "eventbridge" {
+  source         = "./modules/eventbridge"
+  project_name   = var.project_name
+  environment    = var.environment
+  s3_bucket_name = module.s3.bucket_name
+  sqs_queue_arn  = module.sqs.queue_arn
+  tags           = local.common_tags
+}
+
+# ------------------------------------------------------------------------------
+# SQS - FIFO queue between EventBridge and Lambda for concurrency control
+# Provides: buffering, guaranteed delivery, DLQ, serial processing
+# ------------------------------------------------------------------------------
+module "sqs" {
+  source               = "./modules/sqs"
+  project_name         = var.project_name
+  environment          = var.environment
+  eventbridge_rule_arn = module.eventbridge.event_rule_arn
+  tags                 = local.common_tags
+}
+
+# ------------------------------------------------------------------------------
 # IAM - Roles and policies for Lambda, Glue, and Step Functions
 # ------------------------------------------------------------------------------
 module "iam" {
-  source               = "./modules/iam"
-  project_name         = var.project_name
-  environment          = var.environment
-  s3_bucket_arn        = module.s3.bucket_arn
-  sns_topic_arn        = module.sns.topic_arn
-  step_function_arn    = "*"  # Avoid circular dep: IAM <-> Step Functions
+  source                 = "./modules/iam"
+  project_name           = var.project_name
+  environment            = var.environment
+  s3_bucket_arn          = module.s3.bucket_arn
+  sns_topic_arn          = module.sns.topic_arn
+  step_function_arn      = "*" # Avoid circular dep: IAM <-> Step Functions
   redshift_workgroup_arn = var.redshift_workgroup_arn
-  secret_arn           = var.secret_arn
-  tags                 = local.common_tags
+  secret_arn             = var.secret_arn
+  sqs_queue_arn          = module.sqs.queue_arn
+  tags                   = local.common_tags
 }
 
 # ------------------------------------------------------------------------------
@@ -81,7 +108,7 @@ module "step_functions" {
 }
 
 # ------------------------------------------------------------------------------
-# Lambda - Orchestrator and SFTP log-transfer functions
+# Lambda - Orchestrator (SQS-triggered) and SFTP log-transfer functions
 # ------------------------------------------------------------------------------
 module "lambda" {
   source                      = "./modules/lambda"
@@ -93,21 +120,9 @@ module "lambda" {
   step_function_arn           = module.step_functions.state_machine_arn
   s3_bucket_name              = module.s3.bucket_name
   s3_bucket_arn               = module.s3.bucket_arn
+  sqs_queue_arn               = module.sqs.queue_arn
   sftp_secret_name            = var.sftp_secret_name
   orchestrator_source_dir     = "${path.module}/../LAMBDA_FUNCTIONS"
   sftp_source_dir             = "${path.module}/../LAMBDA_FUNCTIONS"
   tags                        = local.common_tags
-}
-
-# ------------------------------------------------------------------------------
-# EventBridge - S3 event rule that triggers the orchestrator Lambda
-# ------------------------------------------------------------------------------
-module "eventbridge" {
-  source                            = "./modules/eventbridge"
-  project_name                      = var.project_name
-  environment                       = var.environment
-  s3_bucket_name                    = module.s3.bucket_name
-  lambda_orchestrator_arn           = module.lambda.orchestrator_function_arn
-  lambda_orchestrator_function_name = module.lambda.orchestrator_function_name
-  tags                              = local.common_tags
 }

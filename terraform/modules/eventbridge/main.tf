@@ -25,22 +25,21 @@ resource "aws_cloudwatch_event_rule" "s3_ingestion_trigger" {
 }
 
 ################################################################################
-# EventBridge Target - Lambda Orchestrator
+# EventBridge Target - SQS FIFO Queue
+#
+# Events flow: S3 -> EventBridge -> SQS FIFO -> Lambda (concurrency=1)
+# This replaces the direct EventBridge -> Lambda invocation to provide:
+#   - Buffering for burst file uploads
+#   - Guaranteed delivery (messages retained up to 4 days)
+#   - DLQ for poison messages
+#   - Concurrency control via Lambda reserved concurrency
 ################################################################################
 
-resource "aws_cloudwatch_event_target" "lambda_orchestrator" {
+resource "aws_cloudwatch_event_target" "sqs_ingestion" {
   rule = aws_cloudwatch_event_rule.s3_ingestion_trigger.name
-  arn  = var.lambda_orchestrator_arn
-}
+  arn  = var.sqs_queue_arn
 
-################################################################################
-# Lambda Permission - Allow EventBridge Invocation
-################################################################################
-
-resource "aws_lambda_permission" "allow_eventbridge" {
-  statement_id  = "AllowEventBridgeInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = var.lambda_orchestrator_function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.s3_ingestion_trigger.arn
+  sqs_target {
+    message_group_id = "ingestion-events"
+  }
 }
