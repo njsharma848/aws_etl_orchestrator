@@ -1,0 +1,86 @@
+name: Deploy ETL Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - staging
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  determine-environment:
+    name: Determine Target Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - name: Set environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "environment=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Deploy to ${{ needs.determine-environment.outputs.environment }}
+    needs: determine-environment
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    concurrency:
+      group: deploy-${{ needs.determine-environment.outputs.environment }}
+      cancel-in-progress: false
+    env:
+      TF_ENV: ${{ needs.determine-environment.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Upload Glue scripts to S3
+        run: |
+          BUCKET="etl-orchestrator-${TF_ENV}-data"
+          echo "Uploading Glue job script to s3://${BUCKET}/scripts/"
+          aws s3 cp GLUE_JOBS/without_data_model/glue_job.py "s3://${BUCKET}/scripts/glue_job.py"
+          echo "Syncing config files to s3://${BUCKET}/config/"
+          aws s3 sync CONFIGS/ "s3://${BUCKET}/config/"
+
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ env.TF_ENV }}
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: terraform/environments/${{ env.TF_ENV }}
+        run: terraform plan -var-file=terraform.tfvars -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: terraform/environments/${{ env.TF_ENV }}
+        run: terraform apply -auto-approve tfplan
