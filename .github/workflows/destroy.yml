@@ -1,0 +1,72 @@
+name: Destroy Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment to destroy"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - staging
+          - prod
+      confirm:
+        description: 'Type "yes" to confirm destruction'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  confirm-destroy:
+    name: Confirm Destruction
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "yes" ]; then
+            echo "ERROR: Destruction not confirmed. You must type 'yes' in the confirm field."
+            echo "Received: '${{ inputs.confirm }}'"
+            exit 1
+          fi
+          echo "Destruction confirmed for environment: ${{ inputs.environment }}"
+
+  destroy:
+    name: Destroy ${{ inputs.environment }}
+    needs: confirm-destroy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      TF_ENV: ${{ inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ env.TF_ENV }}
+        run: terraform init
+
+      - name: Terraform Destroy
+        working-directory: terraform/environments/${{ env.TF_ENV }}
+        run: |
+          echo "Destroying environment: ${TF_ENV}"
+          echo "WARNING: This action is irreversible!"
+          terraform destroy -auto-approve -var-file=terraform.tfvars
