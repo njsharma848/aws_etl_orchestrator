@@ -170,7 +170,7 @@ data "aws_iam_policy_document" "lambda_sftp" {
       "logs:PutLogEvents",
     ]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.project_name}-${var.environment}-sftp:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.project_name}-${var.environment}-log-transfer:*",
     ]
   }
 }

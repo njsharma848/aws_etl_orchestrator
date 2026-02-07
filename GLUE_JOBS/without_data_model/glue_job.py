@@ -321,7 +321,7 @@ def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, cli
         if missed_cols:
             log.info(f"columns: {missed_cols}' are added successfully")
             desc = create_views(config, redshift_conn, client, log)
-            if desc['Status'] == 'FINISHED':
+            if desc and desc['Status'] == 'FINISHED':
                 log.info("view is refreshed successfully")
 
 # VARCHAR length management
@@ -396,7 +396,7 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     if str_altered_cols:
         log.info(f"columns: {str_altered_cols} are altered with new length")
         desc = create_views(config, redshift_conn, client, log)
-        if desc['Status'] == 'FINISHED':
+        if desc and desc['Status'] == 'FINISHED':
             log.info("view is refreshed successfully")
 
     # ---- Handle INTEGER widening ----
@@ -424,7 +424,7 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
             add_sql = f"""
                 ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} ADD COLUMN sample_col {new_type};"""
             set_sql = f"""
-                UPDATE {redshift_conn['schema_name']}.{config['target_table']} SET sample_col = {colname}:{new_type};"""
+                UPDATE {redshift_conn['schema_name']}.{config['target_table']} SET sample_col = {colname}::{new_type};"""
             drop_sql = f"""
                 ALTER TABLE {redshift_conn['schema_name']}.{config['target_table']} DROP COLUMN {colname};"""
             rename_sql = f"""
@@ -443,7 +443,7 @@ def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     if int_altered_cols:
         log.info(f"columns: {int_altered_cols} are altered with new datatype")
         desc = create_views(config, redshift_conn, client, log)
-        if desc['Status'] == 'FINISHED':
+        if desc and desc['Status'] == 'FINISHED':
             log.info("view is refreshed successfully")
 
 # Fill missing columns to match target layout ----------------------------------
