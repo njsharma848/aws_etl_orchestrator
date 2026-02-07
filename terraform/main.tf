@@ -122,7 +122,7 @@ module "lambda" {
   s3_bucket_arn               = module.s3.bucket_arn
   sqs_queue_arn               = module.sqs.queue_arn
   sftp_secret_name            = var.sftp_secret_name
-  orchestrator_source_dir     = "${path.module}/../LAMBDA_FUNCTIONS"
-  sftp_source_dir             = "${path.module}/../LAMBDA_FUNCTIONS"
+  orchestrator_source_dir     = "${path.module}/../lambda_functions"
+  sftp_source_dir             = "${path.module}/../lambda_functions"
   tags                        = local.common_tags
 }

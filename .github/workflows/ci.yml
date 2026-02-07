@@ -27,7 +27,7 @@ jobs:
 
       - name: Run flake8 on Lambda functions and Glue jobs
         run: |
-          flake8 LAMBDA_FUNCTIONS/ GLUE_JOBS/ \
+          flake8 lambda_functions/ glue_jobs/ \
             --max-line-length=120 \
             --ignore=E501,W503,E402
 

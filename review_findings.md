@@ -3,32 +3,32 @@
 ## Critical Bugs (Runtime Failures)
 
 ### 1. Undefined type aliases `T.DoubleType` / `T.DecimalType`
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:146-150`
+- **File:** `glue_jobs/without_data_model/glue_job.py:146-150`
 - **Issue:** `cast_like` references `T.DoubleType` and `T.DecimalType`, but `pyspark.sql.types` is never imported as `T`. Causes `NameError` at runtime.
 - **Fix:** Replace `T.DoubleType` with `DoubleType` and `T.DecimalType` with `DecimalType(38, 18)` (already imported).
 
 ### 2. Missing imports: `ShortType`, `ByteType`, `count`
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:371, 733, 741`
+- **File:** `glue_jobs/without_data_model/glue_job.py:371, 733, 741`
 - **Issue:** `alter_varchar_columns` uses `ShortType`; `check_datatype_matching` uses `ByteType`, `ShortType`, and `count()` -- none are imported.
 - **Fix:** Add `ShortType, ByteType` to the `pyspark.sql.types` import and `count` to the `pyspark.sql.functions` import.
 
 ### 3. Missing `log` argument in `create_new_redshift_table` call
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:899`
+- **File:** `glue_jobs/without_data_model/glue_job.py:899`
 - **Issue:** Called with 4 arguments but function signature at line 286 requires 5 (`config, redshift_conn, df, client, log`).
 - **Fix:** Change to `create_new_redshift_table(config, redshift_conn, df, client, log)`.
 
 ### 4. State machine / Glue job argument mismatch
-- **File:** `STATE_MACHINES/state_machine.json:20` vs `GLUE_JOBS/without_data_model/glue_job.py:831`
+- **File:** `state_machines/state_machine.json:20` vs `glue_jobs/without_data_model/glue_job.py:831`
 - **Issue:** Step Function passes `--source_file_path` but Glue job expects `--source_file_name`.
 - **Fix:** Align the parameter name in either the state machine or the Glue job.
 
 ### 5. `fill_missing_columns` uses `log` as implicit global
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:472-483`
+- **File:** `glue_jobs/without_data_model/glue_job.py:472-483`
 - **Issue:** Function references `log` but doesn't accept it as a parameter.
 - **Fix:** Add `log` as a function parameter.
 
 ### 6. COPY command ignores resolved single-file path
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:517-533`
+- **File:** `glue_jobs/without_data_model/glue_job.py:517-533`
 - **Issue:** `_find_single_csv_in_prefix` resolves the CSV path but COPY still uses the directory prefix.
 - **Fix:** Use the resolved `s3_single_file` path in the COPY command.
 
@@ -37,19 +37,19 @@
 ## Logic Bugs
 
 ### 7. Duplicate type imports
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:12-18`
+- **File:** `glue_jobs/without_data_model/glue_job.py:12-18`
 - **Issue:** `LongType`, `DecimalType`, `BooleanType`, `TimestampType`, `BinaryType` imported twice.
 
 ### 8. Redundant double-read of CSV
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:126-139`
+- **File:** `glue_jobs/without_data_model/glue_job.py:126-139`
 - **Issue:** Source CSV read twice (`df` and `df1`) with identical options. `df1` only used for schema reference that `df` already has.
 
 ### 9. `alter_redshift_table` shadows `df` parameter
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:314`
+- **File:** `glue_jobs/without_data_model/glue_job.py:314`
 - **Issue:** `df` is overwritten immediately with `read_redshift_table_schema(...)`.
 
 ### 10. Double-append in integer column alteration
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:421, 448`
+- **File:** `glue_jobs/without_data_model/glue_job.py:421, 448`
 - **Issue:** Same column appended as tuple and dict, producing a mixed-type list.
 
 ---
@@ -57,19 +57,19 @@
 ## Security Concerns
 
 ### 11. Hardcoded bucket name
-- **File:** `LAMBDA_FUNCTIONS/logs_to_smb.py:15`
+- **File:** `lambda_functions/logs_to_smb.py:15`
 - **Issue:** `S3_BUCKET = 'nyl-invqai-dev-anaplan'` exposes internal naming.
 
 ### 12. SSH host-key validation disabled
-- **File:** `LAMBDA_FUNCTIONS/logs_to_smb.py:48`
+- **File:** `lambda_functions/logs_to_smb.py:48`
 - **Issue:** `paramiko.AutoAddPolicy()` accepts any host key (MITM vulnerability).
 
 ### 13. SQL string interpolation
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:244-249, 763-775`
+- **File:** `glue_jobs/without_data_model/glue_job.py:244-249, 763-775`
 - **Issue:** Values interpolated directly into SQL. The `error_message` field uses basic quote escaping.
 
 ### 14. Dead validation code
-- **File:** `GLUE_JOBS/without_data_model/glue_job.py:594, 656-661`
+- **File:** `glue_jobs/without_data_model/glue_job.py:594, 656-661`
 - **Issue:** `if not key:` check on a hardcoded string will never be true.
 
 ---

@@ -69,10 +69,10 @@ jobs:
         run: |
           BUCKET="etl-orchestrator-${TF_ENV}-data"
           echo "Uploading Glue job scripts to s3://${BUCKET}/scripts/"
-          aws s3 cp GLUE_JOBS/without_data_model/glue_job.py "s3://${BUCKET}/scripts/glue_job.py"
-          aws s3 cp GLUE_JOBS/with_data_model/glue_job_with_data_model.py "s3://${BUCKET}/scripts/glue_job_with_data_model.py"
+          aws s3 cp glue_jobs/without_data_model/glue_job.py "s3://${BUCKET}/scripts/glue_job.py"
+          aws s3 cp glue_jobs/with_data_model/glue_job_with_data_model.py "s3://${BUCKET}/scripts/glue_job_with_data_model.py"
           echo "Syncing config files to s3://${BUCKET}/config/"
-          aws s3 sync CONFIGS/ "s3://${BUCKET}/config/"
+          aws s3 sync configs/ "s3://${BUCKET}/config/"
 
       - name: Terraform Init
         working-directory: terraform/environments/${{ env.TF_ENV }}
