@@ -58,9 +58,10 @@ class LogBuffer:
         return f"s3://{bucket}/{key}"
 
 #======================================
-# retry logic
+# retry logic (exponential backoff)
 #===================================
-def retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,)):
+def retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,)):
+    """Retry with exponential backoff: base_delay * 2^(attempt-1), capped at max_delay."""
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -84,17 +85,18 @@ def retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,
                         else:
                             print(f"{func.__name__} failed after {attempt} attempts: {e}")
                         raise
+                    wait = min(base_delay * (2 ** (attempt - 1)), max_delay)
                     if _log:
                         _log.warning(
                             f"{func.__name__} failed with {type(e).__name__}: {e}. "
-                            f"Retrying in {delay_seconds} seconds (attempt {attempt}/{max_attempts})..."
+                            f"Retrying in {wait}s (attempt {attempt}/{max_attempts})..."
                         )
                     else:
                         print(
                             f"{func.__name__} failed with {type(e).__name__}: {e}. "
-                            f"Retrying in {delay_seconds} seconds (attempt {attempt}/{max_attempts})..."
+                            f"Retrying in {wait}s (attempt {attempt}/{max_attempts})..."
                         )
-                    time.sleep(delay_seconds)
+                    time.sleep(wait)
         return wrapper
     return decorator
     
@@ -130,16 +132,9 @@ def read_csv_file(config: dict, spark):
             if old != new:
                 df = df.withColumnRenamed(old, new)
 
-        df1 = (spark.read.option("header", "true").option("inferSchema", "true").csv(source_file))
-
-        for old in df1.columns:
-            new = _clean_colname(old)
-            if old != new:
-                df1 = df1.withColumnRenamed(old, new)
-
-        def cast_like(df, df1, config: dict):
+        def cast_like(df, config: dict):
             out_cols = []
-            ref_fields = {f.name: f.dataType for f in df1.schema.fields}
+            ref_fields = {f.name: f.dataType for f in df.schema.fields}
             upsert_keys = [i.lower() for i in config['upsert_keys']]
             for name, dtype in ref_fields.items():
                 if isinstance(dtype, DoubleType):
@@ -152,10 +147,10 @@ def read_csv_file(config: dict, spark):
                         out_cols.append(F.col(name).cast(dtype).alias(name))
                     else:
                         out_cols.append(F.lit(None).cast(dtype).alias(name))
-            
+
             return df.select(*out_cols)
 
-        df = cast_like(df, df1, config)
+        df = cast_like(df, config)
 
         run_ts = datetime.now(timezone.utc)
         file_name = source_file.split("/")[-1]
@@ -306,16 +301,16 @@ def create_new_redshift_table(config: dict, redshift_conn: dict, df, client, log
         log.info(f"'{config['target_table']}' table successfully created")
         create_views(config, redshift_conn, client, log)
 
-@retry_on_exception(max_attempts=3, delay_seconds=180, exceptions=(Exception,))
+@retry_on_exception(max_attempts=3, base_delay=5, max_delay=60, exceptions=(Exception,))
 def alter_redshift_table(config: dict, redshift_conn: dict, df, redshift_df, client, log, spark):
-    df = read_redshift_table_schema(config, redshift_conn, spark, client)
-    if set(df.columns) != set(redshift_df.columns):
+    source_df = read_redshift_table_schema(config, redshift_conn, spark, client)
+    if set(source_df.columns) != set(redshift_df.columns):
         #drop view
         drop_views(config, redshift_conn, client, log)
-        
+
         target_cols = [c.name for c in redshift_df.schema.fields]
         missed_cols = []
-        for colf in df.schema.fields:
+        for colf in source_df.schema.fields:
             if colf.name not in target_cols:
                 missed_cols.append(colf.name)
                 rtype = _spark_to_redshift_type(colf.dataType)
@@ -345,7 +340,7 @@ def get_metadata(config: dict, redshift_conn: dict, client) -> dict:
         meta[colname] = {"dtype": dtype, "length": length}
     return meta
 
-@retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,))
+@retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,))
 def alter_varchar_columns(config: dict, redshift_conn: dict, df, client, log):
     metadata = get_metadata(config, redshift_conn, client)
     INT_RANGES = {
@@ -518,7 +513,7 @@ def copy_to_redshift(s3_staging_path: str, redshift_conn: dict, staging_table_na
     s3_single_file = _find_single_csv_in_prefix(s3_staging_path)
     ddl = dedent(f"""
         COPY {schema}.{staging}
-        FROM '{s3_staging_path}'
+        FROM '{s3_single_file}'
         IAM_ROLE '{redshift_conn['iam_role']}'
         FORMAT AS CSV
         TIMEFORMAT 'auto'
@@ -531,7 +526,7 @@ def copy_to_redshift(s3_staging_path: str, redshift_conn: dict, staging_table_na
 # ===============================================================
 # MERGE (delete+insert) with transaction
 # ===============================================================
-@retry_on_exception(max_attempts=3, delay_seconds=300, exceptions=(Exception,))
+@retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,))
 def run_merge(config: dict, redshift_conn: dict, staging_table_name : str, client, log):
     
     keys = config['upsert_keys']
@@ -578,19 +573,15 @@ def get_row_count(config: dict, redshift_conn: dict, client) -> int:
     raise ValueError(f"Unexpected count cell format: {first_cell}")
 
 #====================================================
-#create view
+# view config helper
 #====================================================
-def create_views(config: dict, redshift_conn: dict, client, log):
+def _load_view_config(config: dict, log):
     bucket = config['src_bucket']
     if not bucket:
         log.error("source bucket is not defined")
         raise ValueError("source bucket not found")
-    
+
     key = "config/view_config.json"
-    if not key:
-        log.error("path for config file is not defined")
-        raise ValueError("path of the view_config is not found")
-    
     s3 = boto3.client('s3')
     try:
         response = s3.get_object(Bucket=bucket, Key=key)
@@ -609,16 +600,22 @@ def create_views(config: dict, redshift_conn: dict, client, log):
                 'schema_name': d['schema_name'],
                 'definition': d['definition']
             }
-    
+    return v_config
+
+#====================================================
+#create view
+#====================================================
+def create_views(config: dict, redshift_conn: dict, client, log):
+    v_config = _load_view_config(config, log)
     if not v_config:
         log.info("No configuration found for the target table")
         return None
-    
+
     view_name = v_config['view_name']
-    source_table = v_config['source_table']
     schema_name = v_config['schema_name']
+    source_table = v_config['source_table']
     definition = v_config['definition']
-    
+
     ddl = definition.format(
         schema_name=schema_name,
         view_name=view_name,
@@ -633,7 +630,7 @@ def create_views(config: dict, redshift_conn: dict, client, log):
             SecretArn=redshift_conn['secret_arn']
         )
         stmt_id = resp["Id"]
-        
+
         while True:
             desc = client.describe_statement(Id=stmt_id)
             if desc["Status"] == "FINISHED":
@@ -647,42 +644,14 @@ def create_views(config: dict, redshift_conn: dict, client, log):
         raise
 
 def drop_views(config: dict, redshift_conn: dict, client, log):
-    bucket = config['src_bucket']
-    if not bucket:
-        log.error("source bucket is not defined")
-        raise ValueError("source bucket not found")
-    
-    key = "config/view_config.json"
-    if not key:
-        log.error("path for config file is not defined")
-        raise ValueError("path of the view_config is not found")
-    
-    s3 = boto3.client('s3')
-    try:
-        response = s3.get_object(Bucket=bucket, Key=key)
-        json_file = response['Body'].read().decode('utf-8')
-        data = json.loads(json_file)
-    except Exception as e:
-        log.error(f"Failed to download or parse config file from S3: {e}")
-        raise
-    
-    v_config = None
-    for d in data:
-        if d['source_table'] == config['target_table']:
-            v_config = {
-                'source_table': d['source_table'],
-                'view_name': d['view_name'],
-                'schema_name': d['schema_name'],
-                'definition': d['definition']
-            }
-
+    v_config = _load_view_config(config, log)
     if not v_config:
         log.info("No configuration found for the target table")
         return None
-    
+
     view_name = v_config['view_name']
     schema_name = v_config['schema_name']
-    
+
     ddl = f"""DROP VIEW IF EXISTS {schema_name}.{view_name}"""
 
     try:
@@ -1335,13 +1304,12 @@ def main():
         log.error("ETL FAILED", error=str(e))
         traceback.print_exc()
         try:
-            # best-effort: record failure status
+            # best-effort: record failure status (use records_read from outer scope if available)
             run_end_ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            df = read_csv_file(config, spark)
-            records_read = df.count()
+            fail_records_read = records_read if 'records_read' in dir() else 0
             update_job_sts_table(
                 config, redshift_conn, run_start_ts, run_end_ts, source_filename,
-                records_read, 0, 0, "FAILED", str(e), client
+                fail_records_read, 0, 0, "FAILED", str(e), client
             )
         except Exception as audit_ex:
             log.error("Failed to record job status", error=str(audit_ex))
