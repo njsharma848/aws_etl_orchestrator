@@ -480,12 +480,8 @@ def create_staging_table(config: dict, redshift_conn: dict, staging_table_name: 
     staging = staging_table_name
     log.info(f"Creating staging table: {staging}")
     schema = redshift_conn['schema_name']
-    ddl = dedent(f"""
-        DROP TABLE IF EXISTS {schema}.{staging};
-        CREATE TABLE {schema}.{staging} AS
-        SELECT * FROM {schema}.{config['target_table']} WHERE 1=0;
-    """)
-    execute_sql(ddl, redshift_conn, client)
+    sql = f"CALL public.sp_create_staging_table('{schema}', '{staging}', '{config['target_table']}')"
+    execute_sql(sql, redshift_conn, client)
 
 def _find_single_csv_in_prefix(s3_uri: str) -> str:
     """Return the single CSV object key within the given prefix (coalesce(1) write).
@@ -511,44 +507,20 @@ def copy_to_redshift(s3_staging_path: str, redshift_conn: dict, staging_table_na
     schema = redshift_conn['schema_name']
     # Resolve single-file path to avoid Redshift attempting to read _SUCCESS
     s3_single_file = _find_single_csv_in_prefix(s3_staging_path)
-    ddl = dedent(f"""
-        COPY {schema}.{staging}
-        FROM '{s3_single_file}'
-        IAM_ROLE '{redshift_conn['iam_role']}'
-        FORMAT AS CSV
-        TIMEFORMAT 'auto'
-        DELIMITER ','
-        QUOTE '"'
-        IGNOREHEADER 1;
-    """)
-    execute_sql(ddl, redshift_conn, client)
+    sql = f"CALL public.sp_copy_from_s3('{schema}', '{staging}', '{s3_single_file}', '{redshift_conn['iam_role']}')"
+    execute_sql(sql, redshift_conn, client)
 
 # ===============================================================
 # MERGE (delete+insert) with transaction
 # ===============================================================
 @retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,))
-def run_merge(config: dict, redshift_conn: dict, staging_table_name : str, client, log):
-    
+def run_merge(config: dict, redshift_conn: dict, staging_table_name: str, client, log):
     keys = config['upsert_keys']
     schema = redshift_conn['schema_name']
-    
-    log.info(f"Running merge between {schema}.{config['target_table']}  and {staging_table_name}")
-    
-    tgt = f"{schema}.{config['target_table']}"
-    stg = f"{schema}.{staging_table_name}"
-    # Build join condition (identifiers are safe due to normalization)
-    join_clause = " AND ".join([f"{tgt}.{k} = {stg}.{k}" for k in keys])
-    ddl = dedent(f"""
-        BEGIN;
-        DELETE FROM {tgt}
-        USING {stg}
-        WHERE {join_clause};
-        INSERT INTO {tgt}
-        SELECT * FROM {stg};
-        DROP TABLE {stg};
-        COMMIT;
-    """)
-    execute_sql(ddl, redshift_conn, client)
+    log.info(f"Running merge between {schema}.{config['target_table']} and {staging_table_name}")
+    upsert_keys_csv = ','.join(keys)
+    sql = f"CALL public.sp_merge_from_staging('{schema}', '{config['target_table']}', '{staging_table_name}', '{upsert_keys_csv}')"
+    execute_sql(sql, redshift_conn, client)
 
 def get_row_count(config: dict, redshift_conn: dict, client) -> int:
     sql = f"SELECT COUNT(*) FROM {redshift_conn['schema_name']}.{config['target_table']};"
@@ -686,22 +658,18 @@ def update_job_sts_table(config: dict, redshift_conn: dict,
                          records_inserted: int,
                          status: str, error_message: str,
                          client):
-    run_id = int(time.time())
-    job_id = config['job_id']
+    run_id = str(int(time.time()))
     schema = redshift_conn['schema_name']
-    sql = dedent(f"""
-        INSERT INTO {schema}.JOB_STS (
-            run_id, job_id, run_start_ts, run_end_ts,
-            source_filename, target_table_name,
-            records_read, records_updated, records_inserted,
-            status, error_message)
-        VALUES (
-            {run_id}, '{job_id}', '{run_start_ts}', '{run_end_ts}',
-            '{source_filename}', '{config['target_table']}',
-            {records_read}, {records_updated}, {records_inserted},
-            '{status}', '{error_message.replace("'", "''")}'
-        );
-    """)
+    safe_error = str(error_message).replace("'", "''")[:4096] if error_message else ''
+    safe_filename = source_filename.replace("'", "''")
+    sql = (
+        f"CALL public.sp_log_job_status("
+        f"'{schema}', '{run_id}', '{config['job_id']}', "
+        f"'{run_start_ts}', '{run_end_ts}', "
+        f"'{safe_filename}', '{config['target_table']}', "
+        f"{records_read}, {records_updated}, {records_inserted}, "
+        f"'{status}', '{safe_error}')"
+    )
     execute_sql(sql, redshift_conn, client)
 
 # ===============================================================
@@ -828,104 +796,23 @@ def process_dimension_from_config(df, dim_config: dict, redshift_conn: dict,
     """
     execute_sql(create_stg_sql, redshift_conn, client)
 
-    # COPY to staging — resolve single CSV file within the prefix
+    # COPY to staging via stored procedure
     s3_single_file = _find_single_csv_in_prefix(s3_staging_path)
-    copy_sql = f"""
-        COPY {schema}.{staging_dim}
-        FROM '{s3_single_file}'
-        IAM_ROLE '{redshift_conn['iam_role']}'
-        FORMAT AS CSV
-        DELIMITER ','
-        QUOTE '"'
-        IGNOREHEADER 1;
-    """
+    copy_sql = f"CALL public.sp_copy_from_s3('{schema}', '{staging_dim}', '{s3_single_file}', '{redshift_conn['iam_role']}')"
     execute_sql(copy_sql, redshift_conn, client)
 
-    # SCD Type 2 merge
-    natural_key_join = " AND ".join([f"curr.{k} = stg.{k}" for k in natural_keys])
-    
-    if scd_attrs:
-        scd_change_condition = " OR ".join([
-            f"COALESCE(CAST(curr.{attr} AS VARCHAR), 'NULL') <> COALESCE(CAST(stg.{attr} AS VARCHAR), 'NULL')"
-            for attr in scd_attrs
-        ])
-    else:
-        scd_change_condition = "1=0"  # No SCD tracking
-    
-    # Build explicit column list for INSERT (matches staging columns)
-    stg_col_refs = ', '.join([f"stg.{c}" for c in dim_columns])
+    # SCD Type 2 merge via stored procedure
+    natural_keys_csv = ','.join(natural_keys)
+    scd_attrs_csv = ','.join(scd_attrs) if scd_attrs else ''
+    dim_columns_csv = ','.join(dim_columns)
 
-    merge_sql = f"""
-        BEGIN TRANSACTION;
-
-        -- Snapshot max surrogate key before any inserts
-        CREATE TEMP TABLE max_key AS
-        SELECT COALESCE(MAX({surrogate_key_col}), 0) as max_key
-        FROM {schema}.{dim_table};
-
-        -- Expire changed records
-        UPDATE {schema}.{dim_table} curr
-        SET end_date = CURRENT_DATE - 1,
-            is_current = FALSE,
-            updated_date = GETDATE()
-        FROM {schema}.{staging_dim} stg
-        WHERE {natural_key_join}
-          AND curr.is_current = TRUE
-          AND ({scd_change_condition});
-
-        -- Insert new versions for changed records (version = old version + 1)
-        INSERT INTO {schema}.{dim_table}
-            ({surrogate_key_col}, {', '.join(dim_columns)},
-             effective_date, end_date, is_current, version, created_date, updated_date)
-        SELECT
-            ROW_NUMBER() OVER (ORDER BY {', '.join(['stg.' + k for k in natural_keys])}) +
-                (SELECT max_key FROM max_key) as {surrogate_key_col},
-            {stg_col_refs},
-            stg.effective_date,
-            stg.end_date,
-            stg.is_current,
-            expired.version + 1,
-            stg.created_date,
-            stg.updated_date
-        FROM {schema}.{staging_dim} stg
-        JOIN {schema}.{dim_table} expired
-            ON {' AND '.join([f'expired.{k} = stg.{k}' for k in natural_keys])}
-            AND expired.is_current = FALSE
-            AND expired.end_date = CURRENT_DATE - 1;
-
-        -- Refresh max key after first insert
-        DROP TABLE max_key;
-        CREATE TEMP TABLE max_key AS
-        SELECT COALESCE(MAX({surrogate_key_col}), 0) as max_key
-        FROM {schema}.{dim_table};
-
-        -- Insert completely new records (version = 1)
-        INSERT INTO {schema}.{dim_table}
-            ({surrogate_key_col}, {', '.join(dim_columns)},
-             effective_date, end_date, is_current, version, created_date, updated_date)
-        SELECT
-            ROW_NUMBER() OVER (ORDER BY {', '.join(['stg.' + k for k in natural_keys])}) +
-                (SELECT max_key FROM max_key) as {surrogate_key_col},
-            {stg_col_refs},
-            stg.effective_date,
-            stg.end_date,
-            stg.is_current,
-            1,
-            stg.created_date,
-            stg.updated_date
-        FROM {schema}.{staging_dim} stg
-        WHERE NOT EXISTS (
-            SELECT 1 FROM {schema}.{dim_table} curr
-            WHERE {' AND '.join([f'curr.{k} = stg.{k}' for k in natural_keys])}
-        );
-
-        DROP TABLE {schema}.{staging_dim};
-        DROP TABLE max_key;
-
-        COMMIT;
-    """
-    
-    execute_sql(merge_sql, redshift_conn, client)
+    scd2_sql = (
+        f"CALL public.sp_process_scd_type2("
+        f"'{schema}', '{dim_table}', '{staging_dim}', "
+        f"'{surrogate_key_col}', '{natural_keys_csv}', "
+        f"'{scd_attrs_csv}', '{dim_columns_csv}')"
+    )
+    execute_sql(scd2_sql, redshift_conn, client)
     log.info(f"{dim_table} SCD Type 2 processed successfully")
 
 # ===============================================================
@@ -981,59 +868,24 @@ def process_scd_type1_dimension(df, dim_config: dict, redshift_conn: dict,
     """
     execute_sql(create_stg_sql, redshift_conn, client)
 
-    # COPY to staging — resolve single CSV file within the prefix
+    # COPY to staging via stored procedure
     s3_single_file = _find_single_csv_in_prefix(s3_staging_path)
-    copy_sql = f"""
-        COPY {schema}.{staging_dim}
-        FROM '{s3_single_file}'
-        IAM_ROLE '{redshift_conn['iam_role']}'
-        FORMAT AS CSV
-        DELIMITER ','
-        QUOTE '"'
-        IGNOREHEADER 1;
-    """
+    copy_sql = f"CALL public.sp_copy_from_s3('{schema}', '{staging_dim}', '{s3_single_file}', '{redshift_conn['iam_role']}')"
     execute_sql(copy_sql, redshift_conn, client)
-    natural_key_join = " AND ".join([f"tgt.{k} = src.{k}" for k in natural_keys])
-    
-    # Build update columns (exclude natural keys and surrogate key)
+
+    # SCD Type 1 merge via stored procedure
+    natural_keys_csv = ','.join(natural_keys)
     update_cols = [col for col in dim_columns if col not in natural_keys]
-    update_clause = ', '.join([f"{col} = src.{col}" for col in update_cols])
-    
-    # Build explicit column references for INSERT
-    src_col_refs = ', '.join([f"src.{c}" for c in dim_columns])
+    update_cols_csv = ','.join(update_cols)
+    dim_columns_csv = ','.join(dim_columns)
 
-    # SCD Type 1 MERGE (update existing, insert new)
-    merge_sql = f"""
-        BEGIN TRANSACTION;
-
-        -- Update existing records (overwrite)
-        UPDATE {schema}.{dim_table} tgt
-        SET {update_clause},
-            updated_date = GETDATE()
-        FROM {schema}.{staging_dim} src
-        WHERE {natural_key_join};
-
-        -- Insert new records with explicit column list
-        INSERT INTO {schema}.{dim_table}
-            ({surrogate_key_col}, {', '.join(dim_columns)}, created_date)
-        SELECT
-            ROW_NUMBER() OVER (ORDER BY {', '.join(['src.' + k for k in natural_keys])}) +
-                COALESCE((SELECT MAX({surrogate_key_col}) FROM {schema}.{dim_table}), 0)
-                as {surrogate_key_col},
-            {src_col_refs},
-            src.created_date
-        FROM {schema}.{staging_dim} src
-        WHERE NOT EXISTS (
-            SELECT 1 FROM {schema}.{dim_table} tgt
-            WHERE {natural_key_join}
-        );
-
-        DROP TABLE {schema}.{staging_dim};
-
-        COMMIT;
-    """
-    
-    execute_sql(merge_sql, redshift_conn, client)
+    scd1_sql = (
+        f"CALL public.sp_process_scd_type1("
+        f"'{schema}', '{dim_table}', '{staging_dim}', "
+        f"'{surrogate_key_col}', '{natural_keys_csv}', "
+        f"'{update_cols_csv}', '{dim_columns_csv}')"
+    )
+    execute_sql(scd1_sql, redshift_conn, client)
     log.info(f"{dim_table} (Type 1) processed successfully")
 
 # ===============================================================
@@ -1109,66 +961,54 @@ def process_fact_from_config(df, fact_config: dict, redshift_conn: dict,
     """
     execute_sql(create_stg_sql, redshift_conn, client)
     
-    # COPY to staging — resolve single CSV file within the prefix
+    # COPY to staging via stored procedure
     s3_single_file = _find_single_csv_in_prefix(s3_staging_path)
-    copy_sql = f"""
-        COPY {schema}.{staging_fact}
-        FROM '{s3_single_file}'
-        IAM_ROLE '{redshift_conn['iam_role']}'
-        FORMAT AS CSV
-        DELIMITER ','
-        QUOTE '"'
-        IGNOREHEADER 1;
-    """
+    copy_sql = f"CALL public.sp_copy_from_s3('{schema}', '{staging_fact}', '{s3_single_file}', '{redshift_conn['iam_role']}')"
     execute_sql(copy_sql, redshift_conn, client)
-    
-    # Build INSERT with dimension lookups
+
+    # Build dimension lookup parameters for sp_load_fact_table
     join_clauses = []
     surrogate_keys = []
-    
+
     for lookup in dim_lookups:
         dim_name = lookup['dimension']
         nat_keys = lookup['natural_keys']
         surrogate = lookup['surrogate_key']
-        
+
         alias = dim_name.replace('dim_', 'd_')
-        
+
         join_condition = " AND ".join([
             f"stg.{k} = {alias}.{k}" for k in nat_keys
         ])
-        
+
         # Check if dimension has is_current column (SCD Type 2)
         if dim_name not in ['dim_date', 'dim_version', 'dim_data_source']:
             current_check = f"AND {alias}.is_current = TRUE"
         else:
             current_check = ""
-        
-        join_clauses.append(f"""
-            LEFT JOIN {schema}.{dim_name} {alias}
-                ON {join_condition}
-                {current_check}
-        """)
-        
+
+        join_clauses.append(
+            f"LEFT JOIN {schema}.{dim_name} {alias} ON {join_condition} {current_check}"
+        )
+
         surrogate_keys.append(f"{alias}.{surrogate}")
-    
-    # Build final INSERT
-    all_columns = surrogate_keys + [f"stg.{m}" for m in measures] + \
-                  [f"stg.{d}" for d in degen_dims] + ["stg.load_timestamp"]
-    
-    insert_sql = f"""
-        BEGIN TRANSACTION;
 
-        INSERT INTO {schema}.{fact_table}
-        SELECT {', '.join(all_columns)}
-        FROM {schema}.{staging_fact} stg
-        {' '.join(join_clauses)};
+    surrogate_selects = ', '.join(surrogate_keys)
+    measure_cols = ', '.join(
+        [f"stg.{m}" for m in measures] +
+        [f"stg.{d}" for d in degen_dims] +
+        ["stg.load_timestamp"]
+    )
+    join_clause_str = ' '.join(join_clauses)
 
-        DROP TABLE {schema}.{staging_fact};
-
-        COMMIT;
-    """
-    
-    execute_sql(insert_sql, redshift_conn, client)
+    # Load fact table via stored procedure
+    fact_sql = (
+        f"CALL public.sp_load_fact_table("
+        f"'{schema}', '{fact_table}', '{staging_fact}', "
+        f"'{surrogate_selects}', '{measure_cols}', "
+        f"'{join_clause_str}')"
+    )
+    execute_sql(fact_sql, redshift_conn, client)
     log.info(f"{fact_table} populated successfully")
 
 # ===============================================================

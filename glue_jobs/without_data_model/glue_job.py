@@ -481,12 +481,8 @@ def create_staging_table(config: dict, redshift_conn: dict, staging_table_name: 
     staging = staging_table_name
     log.info(f"Creating staging table: {staging}")
     schema = redshift_conn['schema_name']
-    ddl = dedent(f"""
-        DROP TABLE IF EXISTS {schema}.{staging};
-        CREATE TABLE {schema}.{staging} AS
-        SELECT * FROM {schema}.{config['target_table']} WHERE 1=0;
-    """)
-    execute_sql(ddl, redshift_conn, client)
+    sql = f"CALL public.sp_create_staging_table('{schema}', '{staging}', '{config['target_table']}')"
+    execute_sql(sql, redshift_conn, client)
 
 def _find_single_csv_in_prefix(s3_uri: str) -> str:
     """Return the single CSV object key within the given prefix (coalesce(1) write).
@@ -512,44 +508,20 @@ def copy_to_redshift(s3_staging_path: str, redshift_conn: dict, staging_table_na
     schema = redshift_conn['schema_name']
     # Resolve single-file path to avoid Redshift attempting to read _SUCCESS
     s3_single_file = _find_single_csv_in_prefix(s3_staging_path)
-    ddl = dedent(f"""
-        COPY {schema}.{staging}
-        FROM '{s3_single_file}'
-        IAM_ROLE '{redshift_conn['iam_role']}'
-        FORMAT AS CSV
-        TIMEFORMAT 'auto'
-        DELIMITER ','
-        QUOTE '"'
-        IGNOREHEADER 1;
-    """)
-    execute_sql(ddl, redshift_conn, client)
+    sql = f"CALL public.sp_copy_from_s3('{schema}', '{staging}', '{s3_single_file}', '{redshift_conn['iam_role']}')"
+    execute_sql(sql, redshift_conn, client)
 
 # ===============================================================
 # MERGE (delete+insert) with transaction
 # ===============================================================
 @retry_on_exception(max_attempts=3, base_delay=5, max_delay=120, exceptions=(Exception,))
-def run_merge(config: dict, redshift_conn: dict, staging_table_name : str, client, log):
-    
+def run_merge(config: dict, redshift_conn: dict, staging_table_name: str, client, log):
     keys = config['upsert_keys']
     schema = redshift_conn['schema_name']
-    
-    log.info(f"Running merge between {schema}.{config['target_table']}  and {staging_table_name}")
-    
-    tgt = f"{schema}.{config['target_table']}"
-    stg = f"{schema}.{staging_table_name}"
-    # Build join condition (identifiers are safe due to normalization)
-    join_clause = " AND ".join([f"{tgt}.{k} = {stg}.{k}" for k in keys])
-    ddl = dedent(f"""
-        BEGIN;
-        DELETE FROM {tgt}
-        USING {stg}
-        WHERE {join_clause};
-        INSERT INTO {tgt}
-        SELECT * FROM {stg};
-        DROP TABLE {stg};
-        COMMIT;
-    """)
-    execute_sql(ddl, redshift_conn, client)
+    log.info(f"Running merge between {schema}.{config['target_table']} and {staging_table_name}")
+    upsert_keys_csv = ','.join(keys)
+    sql = f"CALL public.sp_merge_from_staging('{schema}', '{config['target_table']}', '{staging_table_name}', '{upsert_keys_csv}')"
+    execute_sql(sql, redshift_conn, client)
 
 def get_row_count(config: dict, redshift_conn: dict, client) -> int:
     sql = f"SELECT COUNT(*) FROM {redshift_conn['schema_name']}.{config['target_table']};"
@@ -718,22 +690,18 @@ def update_job_sts_table(config: dict, redshift_conn: dict,
                          records_inserted: int,
                          status: str, error_message: str,
                          client):
-    run_id = int(time.time())
-    job_id = config['job_id']
+    run_id = str(int(time.time()))
     schema = redshift_conn['schema_name']
-    sql = dedent(f"""
-        INSERT INTO {schema}.JOB_STS (
-            run_id, job_id, run_start_ts, run_end_ts,
-            source_filename, target_table_name,
-            records_read, records_updated, records_inserted,
-            status, error_message)
-        VALUES (
-            {run_id}, '{job_id}', '{run_start_ts}', '{run_end_ts}',
-            '{source_filename}', '{config['target_table']}',
-            {records_read}, {records_updated}, {records_inserted},
-            '{status}', '{error_message.replace("'", "''")}'
-        );
-    """)
+    safe_error = str(error_message).replace("'", "''")[:4096] if error_message else ''
+    safe_filename = source_filename.replace("'", "''")
+    sql = (
+        f"CALL public.sp_log_job_status("
+        f"'{schema}', '{run_id}', '{config['job_id']}', "
+        f"'{run_start_ts}', '{run_end_ts}', "
+        f"'{safe_filename}', '{config['target_table']}', "
+        f"{records_read}, {records_updated}, {records_inserted}, "
+        f"'{status}', '{safe_error}')"
+    )
     execute_sql(sql, redshift_conn, client)
 
 # ===============================================================
