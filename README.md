@@ -115,6 +115,17 @@ aws_etl_orchestrator/
 |   |-- incremental_loading/        #     CDC and incremental patterns
 |   +-- python_etl_essentials/      #     Python/PySpark reference material
 |
+|-- stored_procedures/                #   Redshift stored procedures
+|   |-- 00_setup.sql                 #     Audit tables setup
+|   |-- 01_utility_procedures.sql    #     Helper procedures
+|   |-- 02_merge_upsert.sql         #     Core merge/upsert
+|   |-- 03_scd_type2.sql            #     SCD Type 2 dimension processing
+|   |-- 04_scd_type1.sql            #     SCD Type 1 dimension processing
+|   |-- 05_fact_loader.sql          #     Fact table loader
+|   |-- 06_audit_logging.sql        #     Job status logging + views
+|   |-- 07_data_quality.sql         #     Data quality checks
+|   +-- 08_table_maintenance.sql    #     VACUUM, ANALYZE, maintenance
+|
 |-- design_flow/                     #   Architecture workflow docs
 |-- enhancements/                    #   Future enhancement notes
 |-- investment_mgmts/                #   Domain documentation
@@ -389,6 +400,40 @@ EventBridge -----> | SQS FIFO Queue    |-----> Lambda (concurrency=1)
 5. **Upload source file** to `s3://{bucket}/data/in/NewFeed.csv` to trigger the pipeline.
 
 No code changes required -- the pipeline is entirely config-driven.
+
+---
+
+## Stored Procedures
+
+Redshift stored procedures are provided in `stored_procedures/` and should be run in order:
+
+| File | Procedures | Description |
+|------|-----------|-------------|
+| `00_setup.sql` | Tables: `job_sts`, `data_quality_results` | Creates audit and DQ tables (run first) |
+| `01_utility_procedures.sql` | `sp_check_table_exists`, `sp_get_row_count`, `sp_create_staging_table`, `sp_copy_from_s3`, `sp_drop_view_if_exists`, `sp_alter_table_add_column`, `sp_alter_varchar_length`, `sp_widen_integer_column` | Lightweight helpers used across the pipeline |
+| `02_merge_upsert.sql` | `sp_merge_from_staging` | Core delete-then-insert merge with dynamic key parsing |
+| `03_scd_type2.sql` | `sp_process_scd_type2` | SCD Type 2: expire changed records, insert new versions, insert new members |
+| `04_scd_type1.sql` | `sp_process_scd_type1` | SCD Type 1: overwrite attributes, insert new members |
+| `05_fact_loader.sql` | `sp_load_fact_table` | Fact loading with dimension surrogate key lookups |
+| `06_audit_logging.sql` | `sp_log_job_status`, `sp_log_job_start`, views: `v_job_history`, `v_job_summary` | ETL audit trail and monitoring dashboards |
+| `07_data_quality.sql` | `sp_dq_check_nulls`, `sp_dq_check_duplicates`, `sp_dq_check_row_count`, `sp_dq_check_freshness`, `sp_dq_check_referential_integrity`, view: `v_data_quality_dashboard` | Automated data quality checks with result logging |
+| `08_table_maintenance.sql` | `sp_vacuum_table`, `sp_analyze_table`, `sp_maintenance_all_etl_tables`, `sp_purge_old_audit_records`, view: `v_table_health` | VACUUM, ANALYZE, scheduled maintenance, audit cleanup |
+
+### Installation
+
+```bash
+# Connect to Redshift and run in order:
+psql -h <workgroup-endpoint> -d <database> -U <user> \
+  -f stored_procedures/00_setup.sql \
+  -f stored_procedures/01_utility_procedures.sql \
+  -f stored_procedures/02_merge_upsert.sql \
+  -f stored_procedures/03_scd_type2.sql \
+  -f stored_procedures/04_scd_type1.sql \
+  -f stored_procedures/05_fact_loader.sql \
+  -f stored_procedures/06_audit_logging.sql \
+  -f stored_procedures/07_data_quality.sql \
+  -f stored_procedures/08_table_maintenance.sql
+```
 
 ---
 
