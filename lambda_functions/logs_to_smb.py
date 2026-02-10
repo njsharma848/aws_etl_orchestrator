@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 import os
 
+
 def lambda_handler(event, context):
     """
     Triggered by S3 event when log file is created

@@ -13,17 +13,17 @@ resource "aws_glue_job" "etl_job" {
   }
 
   default_arguments = {
-    "--job-language"                          = "python"
-    "--TempDir"                               = "s3://${var.s3_bucket_name}/temp/"
-    "--enable-metrics"                        = "true"
-    "--enable-continuous-cloudwatch-log"       = "true"
-    "--workgroup_name"                        = var.redshift_workgroup_name
-    "--database"                              = var.redshift_database
-    "--region"                                = var.aws_region
-    "--secret_arn"                            = var.secret_arn
-    "--iam_role"                              = var.glue_role_arn
-    "--schema_name"                           = var.redshift_schema
-    "--src_bucket"                            = var.s3_bucket_name
+    "--job-language"                     = "python"
+    "--TempDir"                          = "s3://${var.s3_bucket_name}/temp/"
+    "--enable-metrics"                   = "true"
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--workgroup_name"                   = var.redshift_workgroup_name
+    "--database"                         = var.redshift_database
+    "--region"                           = var.aws_region
+    "--secret_arn"                       = var.secret_arn
+    "--iam_role"                         = var.glue_role_arn
+    "--schema_name"                      = var.redshift_schema
+    "--src_bucket"                       = var.s3_bucket_name
   }
 
   glue_version      = "4.0"

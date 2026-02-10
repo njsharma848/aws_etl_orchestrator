@@ -34,11 +34,11 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
               Parameters = {
                 JobName = var.glue_job_name
                 Arguments = {
-                  "--job_id.$"            = "$.job_id"
-                  "--job_name.$"          = "$.job_name"
-                  "--source_file_name.$"  = "$.source_file_name"
-                  "--target_table.$"      = "$.target_table"
-                  "--upsert_keys.$"       = "States.JsonToString($.upsert_keys)"
+                  "--job_id.$"           = "$.job_id"
+                  "--job_name.$"         = "$.job_name"
+                  "--source_file_name.$" = "$.source_file_name"
+                  "--target_table.$"     = "$.target_table"
+                  "--upsert_keys.$"      = "States.JsonToString($.upsert_keys)"
                 }
               }
               Catch = [

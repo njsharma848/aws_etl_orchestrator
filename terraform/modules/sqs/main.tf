@@ -14,9 +14,9 @@ resource "aws_sqs_queue" "ingestion" {
   name                        = "${var.project_name}-${var.environment}-ingestion.fifo"
   fifo_queue                  = true
   content_based_deduplication = true
-  visibility_timeout_seconds  = 360 # 6x Lambda timeout (60s)
+  visibility_timeout_seconds  = 360    # 6x Lambda timeout (60s)
   message_retention_seconds   = 345600 # 4 days
-  receive_wait_time_seconds   = 20 # long polling
+  receive_wait_time_seconds   = 20     # long polling
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.ingestion_dlq.arn

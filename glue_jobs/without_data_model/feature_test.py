@@ -1,6 +1,6 @@
 import sys
 import json
-from awsglue.transforms import *
+from awsglue.transforms import *  # noqa: F401,F403
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
