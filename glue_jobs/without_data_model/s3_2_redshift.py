@@ -26,4 +26,3 @@ while True:
         print("view creation failed:", desc.get("Error"))
         raise RuntimeError("DDL failed")
     time.sleep(1)
-    
