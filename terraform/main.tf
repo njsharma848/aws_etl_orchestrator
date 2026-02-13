@@ -118,7 +118,6 @@ module "step_functions" {
   project_name            = var.project_name
   environment             = var.environment
   step_functions_role_arn = module.iam.step_functions_role_arn
-  glue_job_name           = module.glue.glue_job_name
   tags                    = local.common_tags
 }
 
@@ -137,6 +136,8 @@ module "lambda" {
   s3_bucket_arn                = module.s3.bucket_arn
   sqs_queue_arn                = module.sqs.queue_arn
   sftp_secret_name             = var.sftp_secret_name
+  glue_job_simple_name         = module.glue.simple_job_name
+  glue_job_data_model_name     = module.glue.data_model_job_name
   orchestrator_source_dir      = "${path.module}/../lambda_functions"
   sftp_source_dir              = "${path.module}/../lambda_functions"
   tags                         = local.common_tags

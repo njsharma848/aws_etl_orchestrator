@@ -20,8 +20,10 @@ resource "aws_lambda_function" "orchestrator" {
 
   environment {
     variables = {
-      SNS_TOPIC_ARN     = var.sns_topic_arn
-      STEP_FUNCTION_ARN = var.step_function_arn
+      SNS_TOPIC_ARN       = var.sns_topic_arn
+      STEP_FUNCTION_ARN   = var.step_function_arn
+      GLUE_JOB_SIMPLE     = var.glue_job_simple_name
+      GLUE_JOB_DATA_MODEL = var.glue_job_data_model_name
     }
   }
 

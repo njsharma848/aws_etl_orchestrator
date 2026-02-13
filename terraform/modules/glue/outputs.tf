@@ -2,12 +2,12 @@
 # Glue Module - Outputs
 ################################################################################
 
-output "glue_job_name" {
-  description = "Name of the Glue ETL job"
-  value       = aws_glue_job.etl_job.name
+output "simple_job_name" {
+  description = "Name of the simple ETL Glue job (without data model)"
+  value       = aws_glue_job.etl_simple.name
 }
 
-output "glue_job_arn" {
-  description = "ARN of the Glue ETL job"
-  value       = aws_glue_job.etl_job.arn
+output "data_model_job_name" {
+  description = "Name of the data model ETL Glue job (with star schema)"
+  value       = aws_glue_job.etl_data_model.name
 }

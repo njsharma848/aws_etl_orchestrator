@@ -13,6 +13,8 @@ sfn = boto3.client("stepfunctions")
 # Environment variables
 SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
 STEP_FUNCTION_ARN = os.environ["STEP_FUNCTION_ARN"]
+GLUE_JOB_SIMPLE = os.environ["GLUE_JOB_SIMPLE"]
+GLUE_JOB_DATA_MODEL = os.environ["GLUE_JOB_DATA_MODEL"]
 
 CONFIG_KEY = "config/config.json"
 
@@ -56,9 +58,20 @@ def move_s3_object(bucket_name, source_key, destination_key):
     s3.delete_object(Bucket=bucket_name, Key=source_key)
 
 
+def resolve_glue_job_name(job_config):
+    """Select the Glue job based on the 'glue_job' field in config.json."""
+    glue_job = job_config.get("glue_job", "simple")
+    if glue_job == "data_model":
+        return GLUE_JOB_DATA_MODEL
+    return GLUE_JOB_SIMPLE
+
+
 def start_state_machine_execution(file_name, job_config):
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     execution_name = f"run-{sanitize(file_name)}-{timestamp}"
+    glue_job_name = resolve_glue_job_name(job_config)
+
+    print(f"Routing to Glue job: {glue_job_name}")
 
     try:
         sfn.start_execution(
@@ -67,6 +80,7 @@ def start_state_machine_execution(file_name, job_config):
             input=json.dumps({
                 "glue_jobs": [
                     {
+                        "glue_job_name": glue_job_name,
                         "job_id": job_config["job_id"],
                         "job_name": job_config["job_name"],
                         "source_file_name": file_name,

@@ -59,6 +59,16 @@ variable "sftp_source_dir" {
   type        = string
 }
 
+variable "glue_job_simple_name" {
+  description = "Name of the simple ETL Glue job (without data model)"
+  type        = string
+}
+
+variable "glue_job_data_model_name" {
+  description = "Name of the data model ETL Glue job (with star schema)"
+  type        = string
+}
+
 variable "tags" {
   description = "Map of tags to apply to all resources"
   type        = map(string)

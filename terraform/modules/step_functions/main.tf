@@ -32,7 +32,7 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
               Type     = "Task"
               Resource = "arn:aws:states:::glue:startJobRun.sync"
               Parameters = {
-                JobName = var.glue_job_name
+                "JobName.$" = "$.glue_job_name"
                 Arguments = {
                   "--job_id.$"           = "$.job_id"
                   "--job_name.$"         = "$.job_name"

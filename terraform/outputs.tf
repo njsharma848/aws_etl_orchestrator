@@ -12,9 +12,14 @@ output "lambda_orchestrator_arn" {
   value       = module.lambda.orchestrator_function_arn
 }
 
-output "glue_job_name" {
-  description = "Name of the Glue ETL job."
-  value       = module.glue.glue_job_name
+output "glue_simple_job_name" {
+  description = "Name of the simple ETL Glue job."
+  value       = module.glue.simple_job_name
+}
+
+output "glue_data_model_job_name" {
+  description = "Name of the data model ETL Glue job."
+  value       = module.glue.data_model_job_name
 }
 
 output "state_machine_arn" {

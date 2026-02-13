@@ -17,11 +17,6 @@ variable "step_functions_role_arn" {
   type        = string
 }
 
-variable "glue_job_name" {
-  description = "Name of the Glue job to invoke"
-  type        = string
-}
-
 variable "tags" {
   description = "Resource tags"
   type        = map(string)
