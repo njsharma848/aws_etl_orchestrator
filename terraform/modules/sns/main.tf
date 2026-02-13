@@ -1,18 +1,10 @@
 ################################################################################
-# KMS Key Alias for SNS Encryption
-################################################################################
-
-data "aws_kms_alias" "sns" {
-  name = "alias/aws/sns"
-}
-
-################################################################################
 # SNS Topic - ETL Notifications
 ################################################################################
 
 resource "aws_sns_topic" "etl_notifications" {
   name              = "${var.project_name}-${var.environment}-etl-notifications"
-  kms_master_key_id = data.aws_kms_alias.sns.arn
+  kms_master_key_id = "alias/aws/sns"
 
   tags = var.tags
 }
