@@ -26,7 +26,6 @@ module "etl_pipeline" {
   redshift_workgroup_name = var.redshift_workgroup_name
   redshift_database       = var.redshift_database
   redshift_schema         = var.redshift_schema
-  secret_arn              = var.secret_arn
   sftp_secret_name        = var.sftp_secret_name
   glue_workers            = var.glue_workers
 }

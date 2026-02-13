@@ -44,12 +44,6 @@ variable "redshift_schema" {
   default     = "public"
 }
 
-variable "secret_arn" {
-  description = "ARN of the Secrets Manager secret."
-  type        = string
-  default     = "arn:aws:secretsmanager:us-east-1:652615011843:secret:staging/redshift/credentials"
-}
-
 variable "sftp_secret_name" {
   description = "Name of the SFTP Secrets Manager secret."
   type        = string

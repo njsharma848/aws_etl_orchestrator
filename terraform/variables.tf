@@ -41,15 +41,10 @@ variable "redshift_schema" {
   default     = "public"
 }
 
-variable "redshift_workgroup_arn" {
-  description = "ARN of the Redshift Serverless workgroup. Use \"*\" before the workgroup exists."
-  type        = string
-  default     = "*"
-}
-
-variable "secret_arn" {
-  description = "ARN of the Secrets Manager secret (Redshift / SFTP credentials)."
-  type        = string
+variable "redshift_base_capacity" {
+  description = "Base RPU capacity for Redshift Serverless (minimum 8)."
+  type        = number
+  default     = 8
 }
 
 variable "sftp_secret_name" {

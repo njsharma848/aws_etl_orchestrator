@@ -156,7 +156,7 @@ data "aws_iam_policy_document" "lambda_sftp" {
       "secretsmanager:DescribeSecret",
     ]
     resources = [
-      var.secret_arn,
+      "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:${var.sftp_secret_name}-*",
     ]
   }
 

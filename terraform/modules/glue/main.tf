@@ -21,7 +21,7 @@ resource "aws_glue_job" "etl_job" {
     "--database"                         = var.redshift_database
     "--region"                           = var.aws_region
     "--secret_arn"                       = var.secret_arn
-    "--iam_role"                         = var.glue_role_arn
+    "--iam_role"                         = var.redshift_copy_role_arn
     "--schema_name"                      = var.redshift_schema
     "--src_bucket"                       = var.s3_bucket_name
   }

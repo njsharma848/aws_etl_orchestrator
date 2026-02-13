@@ -28,15 +28,15 @@ variable "step_function_arn" {
   default     = "*"
 }
 
-variable "redshift_workgroup_arn" {
-  description = "ARN of the Redshift Serverless workgroup. Use \"*\" before the workgroup is created."
+variable "secret_arn" {
+  description = "ARN of the Secrets Manager secret for Redshift credentials."
   type        = string
-  default     = "*"
 }
 
-variable "secret_arn" {
-  description = "ARN of the Secrets Manager secret (e.g. SFTP credentials, Redshift credentials)."
+variable "sftp_secret_name" {
+  description = "Name of the Secrets Manager secret for SFTP credentials."
   type        = string
+  default     = ""
 }
 
 variable "sqs_queue_arn" {

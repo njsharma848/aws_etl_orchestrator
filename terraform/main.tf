@@ -62,19 +62,33 @@ module "sqs" {
 }
 
 # ------------------------------------------------------------------------------
+# Redshift Serverless - Namespace, Workgroup, Secret, IAM Role
+# ------------------------------------------------------------------------------
+module "redshift" {
+  source         = "./modules/redshift"
+  project_name   = var.project_name
+  environment    = var.environment
+  workgroup_name = var.redshift_workgroup_name
+  database_name  = var.redshift_database
+  base_capacity  = var.redshift_base_capacity
+  s3_bucket_arn  = module.s3.bucket_arn
+  tags           = local.common_tags
+}
+
+# ------------------------------------------------------------------------------
 # IAM - Roles and policies for Lambda, Glue, and Step Functions
 # ------------------------------------------------------------------------------
 module "iam" {
-  source                 = "./modules/iam"
-  project_name           = var.project_name
-  environment            = var.environment
-  s3_bucket_arn          = module.s3.bucket_arn
-  sns_topic_arn          = module.sns.topic_arn
-  step_function_arn      = "*" # Avoid circular dep: IAM <-> Step Functions
-  redshift_workgroup_arn = var.redshift_workgroup_arn
-  secret_arn             = var.secret_arn
-  sqs_queue_arn          = module.sqs.queue_arn
-  tags                   = local.common_tags
+  source            = "./modules/iam"
+  project_name      = var.project_name
+  environment       = var.environment
+  s3_bucket_arn     = module.s3.bucket_arn
+  sns_topic_arn     = module.sns.topic_arn
+  step_function_arn = "*" # Avoid circular dep: IAM <-> Step Functions
+  secret_arn        = module.redshift.secret_arn
+  sftp_secret_name  = var.sftp_secret_name
+  sqs_queue_arn     = module.sqs.queue_arn
+  tags              = local.common_tags
 }
 
 # ------------------------------------------------------------------------------
@@ -86,11 +100,12 @@ module "glue" {
   environment             = var.environment
   glue_role_arn           = module.iam.glue_role_arn
   s3_bucket_name          = module.s3.bucket_name
-  redshift_workgroup_name = var.redshift_workgroup_name
+  redshift_workgroup_name = module.redshift.workgroup_name
   redshift_database       = var.redshift_database
   redshift_schema         = var.redshift_schema
+  redshift_copy_role_arn  = module.redshift.redshift_copy_role_arn
   aws_region              = var.aws_region
-  secret_arn              = var.secret_arn
+  secret_arn              = module.redshift.secret_arn
   glue_workers            = var.glue_workers
   tags                    = local.common_tags
 }

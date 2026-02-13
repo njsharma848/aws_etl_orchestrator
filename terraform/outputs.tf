@@ -36,3 +36,18 @@ output "sqs_dlq_url" {
   description = "URL of the SQS dead-letter queue."
   value       = module.sqs.dlq_url
 }
+
+output "redshift_workgroup_name" {
+  description = "Name of the Redshift Serverless workgroup."
+  value       = module.redshift.workgroup_name
+}
+
+output "redshift_endpoint" {
+  description = "Endpoint address of the Redshift Serverless workgroup."
+  value       = module.redshift.endpoint_address
+}
+
+output "redshift_secret_arn" {
+  description = "ARN of the Secrets Manager secret with Redshift credentials."
+  value       = module.redshift.secret_arn
+}

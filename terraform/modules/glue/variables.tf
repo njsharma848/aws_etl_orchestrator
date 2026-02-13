@@ -48,6 +48,11 @@ variable "secret_arn" {
   type        = string
 }
 
+variable "redshift_copy_role_arn" {
+  description = "ARN of the IAM role Redshift uses for COPY from S3"
+  type        = string
+}
+
 variable "glue_workers" {
   description = "Number of Glue workers"
   type        = number

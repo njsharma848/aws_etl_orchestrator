@@ -5,6 +5,5 @@ notification_email      = ""
 redshift_workgroup_name = "etl-dev-workgroup"
 redshift_database       = "etl_dev"
 redshift_schema         = "public"
-secret_arn              = "arn:aws:secretsmanager:us-east-1:652615011843:secret:dev/redshift/credentials"
 sftp_secret_name        = "dev/sftp/log-transfer"
 glue_workers            = 2
