@@ -5,6 +5,6 @@ notification_email      = ""
 redshift_workgroup_name = "etl-staging-workgroup"
 redshift_database       = "etl_staging"
 redshift_schema         = "public"
-secret_arn              = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:staging/redshift/credentials"
+secret_arn              = "arn:aws:secretsmanager:us-east-1:652615011843:secret:staging/redshift/credentials"
 sftp_secret_name        = "staging/sftp/log-transfer"
 glue_workers            = 3

@@ -18,9 +18,6 @@ resource "aws_lambda_function" "orchestrator" {
   filename         = data.archive_file.orchestrator.output_path
   source_code_hash = data.archive_file.orchestrator.output_base64sha256
 
-  # Limit to 1 concurrent execution so SQS FIFO processes files sequentially
-  reserved_concurrent_executions = 1
-
   environment {
     variables = {
       SNS_TOPIC_ARN     = var.sns_topic_arn

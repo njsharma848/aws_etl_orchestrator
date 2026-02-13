@@ -236,9 +236,7 @@ data "aws_iam_policy_document" "glue_etl" {
       "redshift-data:DescribeStatement",
       "redshift-data:GetStatementResult",
     ]
-    resources = [
-      var.redshift_workgroup_arn,
-    ]
+    resources = ["*"]
   }
 
   # Secrets Manager read
