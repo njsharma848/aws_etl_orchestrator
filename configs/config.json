@@ -31,7 +31,7 @@
         "job_name": "AUM Revenue",
         "source_file_name": "s3://ingestion/data/in/aum_revenue.csv",
         "target_table": "aum_revenue",
-        "upsert_keys": ["transaction_id", "date_key"],
+        "upsert_keys": ["transaction_id", "report_date"],
         "glue_job": "data_model",
         "is_active": true
     },
@@ -40,7 +40,7 @@
         "job_name": "Revenue Plan Forecast",
         "source_file_name": "s3://ingestion/data/in/revenue_plan_forecast.csv",
         "target_table": "revenue_plan_forecast",
-        "upsert_keys": ["plan_id", "date_key"],
+        "upsert_keys": ["plan_id", "report_date"],
         "glue_job": "data_model",
         "is_active": true
     },
@@ -49,7 +49,7 @@
         "job_name": "Expense",
         "source_file_name": "s3://ingestion/data/in/expense.csv",
         "target_table": "expense",
-        "upsert_keys": ["expense_id", "date_key"],
+        "upsert_keys": ["expense_id", "report_date"],
         "glue_job": "data_model",
         "is_active": true
     },
@@ -58,7 +58,7 @@
         "job_name": "Headcount",
         "source_file_name": "s3://ingestion/data/in/headcount.csv",
         "target_table": "headcount",
-        "upsert_keys": ["employee_type", "date_key"],
+        "upsert_keys": ["employee_type", "report_date"],
         "glue_job": "data_model",
         "is_active": true
     },
@@ -67,7 +67,7 @@
         "job_name": "General Account Invoice",
         "source_file_name": "s3://ingestion/data/in/general_account_invoice.csv",
         "target_table": "general_account_invoice",
-        "upsert_keys": ["invoice_id", "date_key"],
+        "upsert_keys": ["invoice_id", "report_date"],
         "glue_job": "data_model",
         "is_active": true
     }
