@@ -90,9 +90,16 @@ resource "aws_lambda_permission" "allow_s3_invoke" {
   source_arn    = var.s3_bucket_arn
 }
 
-# S3 bucket notification to trigger on logs/ prefix ObjectCreated events
-resource "aws_s3_bucket_notification" "sftp_log_trigger" {
-  bucket = var.s3_bucket_name
+# ---------------------------------------------------------------------------
+# Consolidated S3 bucket notification
+#   Terraform only allows ONE aws_s3_bucket_notification per bucket.
+#   A second resource silently overwrites the first, so we combine
+#   EventBridge (for the ingestion pipeline) and the SFTP Lambda trigger
+#   into a single resource here.
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_notification" "consolidated" {
+  bucket      = var.s3_bucket_name
+  eventbridge = true
 
   lambda_function {
     lambda_function_arn = aws_lambda_function.sftp_log_transfer.arn

@@ -93,14 +93,12 @@ resource "aws_s3_bucket_public_access_block" "etl_data" {
 
 # ------------------------------------------------------------------------------
 # EventBridge Notifications
-#   Enables EventBridge to receive events from this bucket. The actual
-#   EventBridge rule is managed by the EventBridge module, so an
-#   aws_s3_bucket_notification resource is not required here.
+#   NOTE: The actual aws_s3_bucket_notification resource is in the Lambda
+#   module, which consolidates BOTH the EventBridge flag and the SFTP
+#   Lambda trigger into a single resource.  Terraform only allows ONE
+#   aws_s3_bucket_notification per bucket -- a second resource silently
+#   overwrites the first.
 # ------------------------------------------------------------------------------
-resource "aws_s3_bucket_notification" "etl_data" {
-  bucket      = aws_s3_bucket.etl_data.id
-  eventbridge = true
-}
 
 # ------------------------------------------------------------------------------
 # Pre-create S3 Folder Structure
