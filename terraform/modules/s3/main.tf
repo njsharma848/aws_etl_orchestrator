@@ -101,3 +101,30 @@ resource "aws_s3_bucket_notification" "etl_data" {
   bucket      = aws_s3_bucket.etl_data.id
   eventbridge = true
 }
+
+# ------------------------------------------------------------------------------
+# Pre-create S3 Folder Structure
+#   S3 "folders" are zero-byte objects with a trailing slash. Pre-creating
+#   them makes the bucket layout visible in the console and documents the
+#   expected directory contract for the pipeline.
+# ------------------------------------------------------------------------------
+locals {
+  s3_folders = [
+    "data/in/",
+    "data/staging/",
+    "data/archive/",
+    "data/unprocessed/",
+    "data/new_files/",
+    "config/",
+    "scripts/",
+    "logs/",
+  ]
+}
+
+resource "aws_s3_object" "folders" {
+  for_each = toset(local.s3_folders)
+
+  bucket  = aws_s3_bucket.etl_data.id
+  key     = each.value
+  content = ""
+}
