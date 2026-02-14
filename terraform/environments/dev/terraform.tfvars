@@ -1,7 +1,7 @@
 project_name            = "etl-orchestrator"
 environment             = "dev"
 aws_region              = "us-east-1"
-notification_email      = ""
+notification_email      = "Yerram.saisanath@gmail.com"
 redshift_workgroup_name = "etl-dev-workgroup"
 redshift_database       = "etl_dev"
 redshift_schema         = "public"
