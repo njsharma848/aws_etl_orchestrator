@@ -87,7 +87,9 @@ resource "aws_redshiftserverless_workgroup" "etl" {
 resource "aws_secretsmanager_secret" "redshift" {
   name                    = "${var.environment}/redshift/credentials"
   recovery_window_in_days = 0
-  tags                    = var.tags
+  tags = merge(var.tags, {
+    RedshiftDataFullAccess = aws_redshiftserverless_workgroup.etl.workgroup_name
+  })
 }
 
 resource "aws_secretsmanager_secret_version" "redshift" {
