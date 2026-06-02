@@ -256,7 +256,7 @@ Each environment has:
 - AWS account with appropriate permissions
 - Terraform >= 1.7.0
 - AWS CLI configured
-- GitHub repository with OIDC configured for AWS
+- GitHub repository with AWS credentials configured — see [docs/setup/configuring_aws_credentials.md](docs/setup/configuring_aws_credentials.md) (access keys today; OIDC also supported)
 
 ### Manual Deployment
 
@@ -300,6 +300,12 @@ aws s3 sync configs/ "s3://${BUCKET}/config/"
 | `AWS_ACCESS_KEY_ID` | IAM access key for the deployer user |
 | `AWS_SECRET_ACCESS_KEY` | IAM secret key for the deployer user |
 | `AWS_REGION` | Target AWS region (e.g., `us-east-1`) |
+
+> **Setting these up?** See
+> [docs/setup/configuring_aws_credentials.md](docs/setup/configuring_aws_credentials.md)
+> for step-by-step instructions. Until valid credentials are configured, the
+> pipelines skip all AWS steps and pass as a no-op, then deploy automatically
+> once the secrets are added.
 
 ---
 
