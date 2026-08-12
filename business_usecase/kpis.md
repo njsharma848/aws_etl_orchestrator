@@ -1,5 +1,5 @@
 # AWS ETL Orchestrator — KPIs & Business Impact 
-## shortcut PNEMONIC : ROLAC , R- Reliability, O- Operational Overhead . L - Latency(Pipeline) , A - Auditability , C- Cost Optimization 
+##  PNEMONIC : ROLAC , R- Reliability, O- Operational Overhead . L - Latency(Pipeline) , A - Auditability , C- Cost Optimization 
 ---
 
 ## Project Overview (30-Second Pitch)
